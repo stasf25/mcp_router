@@ -1,0 +1,28 @@
+services:
+  mcp_router:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"  # только localhost
+    environment:
+      - MCP_ROUTER_API_KEY=${MCP_ROUTER_API_KEY:-}
+      - MCP_ROUTER_JWT_SECRET=${MCP_ROUTER_JWT_SECRET:-}
+      - PLAYWRIGHT_API_KEY=${PLAYWRIGHT_API_KEY:-}
+      - BRIGHTDATA_TOKEN=${BRIGHTDATA_TOKEN:-}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - mcp_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  playwright:
+    image: mcp/playwright:latest
+    networks:
+      - mcp_net
+
+networks:
+  mcp_net:
+    driver: bridge

@@ -1,0 +1,7 @@
+#!bash
+python3.10 -m venv .venv
+echo "*" >.venv/.gitignore
+# Change hardcoded path in VIRTUAL_ENV to dynamically redefined one
+sed -i 's|^VIRTUAL_ENV=.*$|VIRTUAL_ENV="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")"/.. \&\& pwd)"|' .venv/bin/activate
+source venv
+pip install -U pip pipdeptree

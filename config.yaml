@@ -1,0 +1,15 @@
+servers:
+  - name: playwright
+    url: http://playwright:3000/mcp
+    auth:
+      headers:
+        X-API-Key: "PLAYWRIGHT_API_KEY"
+    enabled: true
+    timeout: 30
+
+groups:
+  - name: web_scraping
+    tools:
+      - playwright.navigate
+      - playwright.click
+    enabled: true
