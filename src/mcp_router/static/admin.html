@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>mcp_router — admin</title>
+<style>
+ :root{
+   --bg:#111; --panel:#1a1a1a; --border:#333; --text:#eee; --muted:#888;
+   --ok:#6f6; --err:#f66; --off:#888; --accent:#4a9eff;
+ }
+ *{box-sizing:border-box}
+ body{font-family:system-ui,sans-serif;margin:0;background:var(--bg);color:var(--text)}
+ header{padding:1rem 2rem;border-bottom:1px solid var(--border)}
+ header h1{font-size:1.3rem;margin:0;color:#fff}
+ main{padding:1rem 2rem;max-width:1100px}
+ h2{border-bottom:1px solid var(--border);padding-bottom:.3rem;margin-top:2rem}
+ table{border-collapse:collapse;width:100%;margin-bottom:1.5rem;background:var(--panel)}
+ th,td{border:1px solid var(--border);padding:.4rem .6rem;text-align:left;vertical-align:middle}
+ th{background:#202020;font-weight:600}
+ td.center{text-align:center}
+ .ok{color:var(--ok)} .err{color:var(--err)} .off{color:var(--off)}
+ .tool-name{color:var(--accent);cursor:pointer;text-decoration:underline}
+ tr.tool-ok{background:rgba(102,255,102,.04)}
+ tr.tool-err{background:rgba(255,102,102,.06)}
+ .check{color:var(--ok);font-weight:700}
+ .cross{color:var(--muted)}
+ .badge{padding:.1rem .4rem;border-radius:3px;font-size:.75rem;font-weight:600}
+ .badge.ok{background:rgba(102,255,102,.15)}
+ .badge.err{background:rgba(255,102,102,.15)}
+ .badge.off{background:rgba(136,136,136,.15)}
+ .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:.5rem;vertical-align:middle}
+ .dot.ok{background:var(--ok)}
+ .dot.err{background:var(--err)}
+ pre{background:#0c0c0c;padding:.6rem;overflow:auto;border:1px solid var(--border);border-radius:4px;font-size:.8rem;flex:1;min-height:0;margin:0}
+ .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:flex-start;justify-content:center;padding:2rem;z-index:10}
+ .modal.open{display:flex}
+ .modal-card{background:var(--panel);border:1px solid var(--border);border-radius:8px;max-width:720px;width:100%;height:90vh;padding:1.2rem;display:flex;flex-direction:column}
+ .modal-card h3{margin-top:0;flex-shrink:0}
+ .modal-card .kv{flex-shrink:0}
+ .modal-card #tool-desc{flex-shrink:0}
+ .modal-close{float:right;cursor:pointer;background:none;border:none;color:var(--text);font-size:1.2rem}
+ .kv{display:grid;grid-template-columns:120px 1fr;gap:.3rem .8rem;font-size:.9rem}
+ .kv b{color:var(--muted);font-weight:600}
+</style>
+</head>
+<body>
+<header><h1>mcp_router</h1></header>
+<main>
+  <h2>Серверы</h2>
+  <table id="servers"><thead><tr><th>Имя</th><th>URL</th><th>Enabled</th><th>Статус</th></tr></thead><tbody></tbody></table>
+
+  <h2>Группы</h2>
+  <table id="groups"><thead><tr><th>Имя</th><th>Enabled</th><th>Tools</th></tr></thead><tbody></tbody></table>
+
+  <h2>Tools</h2>
+  <table id="tools">
+    <thead><tr id="tools-head"><th>Tool</th></tr></thead>
+    <tbody id="tools-body"></tbody>
+  </table>
+</main>
+
+<div id="tool-modal" class="modal">
+  <div class="modal-card">
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <h3 id="tool-title"></h3>
+    <div class="kv">
+      <b>Сервер</b><span id="tool-server"></span>
+      <b>Доступен</b><span id="tool-available"></span>
+      <b>Группы</b><span id="tool-groups"></span>
+    </div>
+    <p id="tool-desc"></p>
+    <b>Схема вызова (JSON Schema)</b>
+    <pre id="tool-schema"></pre>
+  </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let groupsCache=[];
+
+async function load(){
+  const [s,g,t]=await Promise.all([
+    fetch('/api/servers').then(r=>r.json()),
+    fetch('/api/groups').then(r=>r.json()),
+    fetch('/api/tools').then(r=>r.json()),
+  ]);
+  groupsCache=g;
+  renderServers(s);
+  renderGroups(g);
+  renderTools(t,g);
+}
+
+function renderServers(s){
+  const tb=$('#servers tbody'); tb.innerHTML='';
+  s.forEach(x=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${esc(x.name)}</td><td>${esc(x.url)}</td><td>${x.enabled}</td>`+
+      `<td><span class="badge ${x.status==='connected'?'ok':(x.status==='error'?'err':'off')}">${esc(x.status)}</span></td>`;
+    tb.appendChild(tr);
+  });
+}
+
+function renderGroups(g){
+  const tb=$('#groups tbody'); tb.innerHTML='';
+  g.forEach(x=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${esc(x.name)}</td><td>${x.enabled}</td><td>${esc(x.tools.join(', '))}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+function renderTools(t,g){
+  // заголовок: Tool + колонка на каждую группу
+  const head=$('#tools-head');
+  head.innerHTML='<th>Tool</th>';
+  g.forEach(gr=>{
+    const th=document.createElement('th');
+    th.textContent=gr.name;
+    head.appendChild(th);
+  });
+
+  const tb=$('#tools-body'); tb.innerHTML='';
+  const gname=new Map(g.map(x=>[x.name,x]));
+  t.forEach(x=>{
+    const tr=document.createElement('tr');
+    tr.className=x.available?'tool-ok':'tool-err';
+    const nameTd=document.createElement('td');
+    nameTd.innerHTML=`<span class="dot ${x.available?'ok':'err'}"></span>`+
+      `<span class="tool-name" data-q="${esc(x.name)}">${esc(x.name)}</span>`;
+    tr.appendChild(nameTd);
+    g.forEach(gr=>{
+      const td=document.createElement('td');
+      td.className='center';
+      const inGroup=(x.groups||[]).includes(gr.name);
+      td.innerHTML=inGroup?'<span class="check">&#10003;</span>':'<span class="cross">&mdash;</span>';
+      tr.appendChild(td);
+    });
+    tb.appendChild(tr);
+  });
+
+  // клики по tool
+  tb.querySelectorAll('.tool-name').forEach(el=>{
+    el.addEventListener('click',()=>openTool(el.dataset.q));
+  });
+}
+
+async function openTool(qualified){
+  const d=await fetch('/api/tool/'+encodeURIComponent(qualified)).then(r=>r.json());
+  $('#tool-title').textContent=d.name;
+  $('#tool-server').textContent=d.server;
+  const avail=$('#tool-available');
+  avail.textContent=d.available?'доступен':'недоступен';
+  avail.className='badge '+(d.available?'ok':'err');
+  $('#tool-groups').textContent=(d.groups||[]).join(', ')||'(нет)';
+  $('#tool-desc').textContent=d.description||'(нет описания)';
+  $('#tool-schema').textContent=JSON.stringify(d.input_schema||{},null,2);
+  $('#tool-modal').classList.add('open');
+}
+function closeModal(){ $('#tool-modal').classList.remove('open'); }
+$('#tool-modal').addEventListener('click',e=>{ if(e.target.id==='tool-modal') closeModal(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
+
+load();
+</script>
+</body>
+</html>

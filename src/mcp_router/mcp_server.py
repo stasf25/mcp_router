@@ -10,12 +10,14 @@ from __future__ import annotations
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import parse_qs
 
 from mcp.server.mcpserver import MCPServer
 from mcp_types import CallToolResult
 from mcp_types import Tool as MCPTool
 from starlette.applications import Starlette
 
+from .jwt_service import JWTError, JWTService
 from .mcp_client import ClientPool
 from .registry import FilterSpec, Registry
 
@@ -28,6 +30,7 @@ RESOLVED_ERROR = "Tool {name} not in scope"
 class RequestCtx:
     path: str
     headers: dict[str, str]
+    query: dict[str, str] = None  # type: ignore[assignment]
 
 
 _REQUEST_CTX: ContextVar[RequestCtx | None] = ContextVar("mcp_request_ctx", default=None)
@@ -35,6 +38,18 @@ _REQUEST_CTX: ContextVar[RequestCtx | None] = ContextVar("mcp_request_ctx", defa
 
 def current_request() -> RequestCtx | None:
     return _REQUEST_CTX.get()
+
+
+def _extract_jwt(ctx: RequestCtx | None) -> str | None:
+    """Извлекает JWT из header Authorization: Bearer или query ?token=."""
+    if ctx is None:
+        return None
+    auth = ctx.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    if ctx.query:
+        return ctx.query.get("token")
+    return None
 
 
 def _spec_from_path(path: str) -> FilterSpec:
@@ -50,19 +65,41 @@ def _spec_from_path(path: str) -> FilterSpec:
 
 
 class ScopedMCPServer(MCPServer):
-    """MCP-сервер, отдающий tools согласно FilterSpec из пути запроса."""
+    """MCP-сервер, отдающий tools согласно FilterSpec из пути запроса и JWT."""
 
-    def __init__(self, registry: Registry, pool: ClientPool, name: str = "mcp_router") -> None:
+    def __init__(
+        self,
+        registry: Registry,
+        pool: ClientPool,
+        jwt: JWTService,
+        name: str = "mcp_router",
+    ) -> None:
         super().__init__(name=name)
         self._registry = registry
         self._pool = pool
+        self._jwt = jwt
 
     def _resolve_spec(self, context=None) -> FilterSpec:
         if context is not None:
-            path = context.request_context.request.url.path
+            url = context.request_context.request.url
+            path = url.path
+            query = {}
+            if url.query:
+                parsed = parse_qs(url.query)
+                query = {k: v[0] for k, v in parsed.items()}
+            ctx = RequestCtx(path=path, headers={}, query=query)
         else:
             ctx = _REQUEST_CTX.get()
             path = ctx.path if ctx else ""
+        jwt_token = _extract_jwt(ctx)
+        if jwt_token:
+            try:
+                tools = self._jwt.decode(jwt_token)
+            except JWTError:
+                # Невалидный/просроченный JWT — по умолчанию безопасно не отдаём
+                # ничего (принудительно пустой скоуп), вместо режима агрегатора.
+                return FilterSpec(mode="jwt", tools=frozenset())
+            return FilterSpec.jwt(tools)
         return _spec_from_path(path)
 
     async def list_tools(self) -> list[MCPTool]:
@@ -96,7 +133,16 @@ class CaptureContextMiddleware:
                 k.decode("latin-1").lower(): v.decode("latin-1")
                 for k, v in scope.get("headers", [])
             }
-            token = _REQUEST_CTX.set(RequestCtx(path=scope["path"], headers=headers))
+            query = {}
+            qs = scope.get("query_string", b"")
+            if qs:
+                for pair in qs.decode("latin-1").split("&"):
+                    if "=" in pair:
+                        k, _, v = pair.partition("=")
+                        query[k] = v
+            token = _REQUEST_CTX.set(
+                RequestCtx(path=scope["path"], headers=headers, query=query)
+            )
             try:
                 await self.app(scope, receive, send)
             finally:

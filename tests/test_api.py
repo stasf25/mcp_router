@@ -74,6 +74,13 @@ def test_admin_index(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "mcp_router" in r.text
+    assert "tool-modal" in r.text
+    assert "tools-head" in r.text
+
+
+def test_tool_unknown_404(client):
+    r = client.get("/api/tool/mock.nope")
+    assert r.status_code == 404
 
 
 def test_group_tools_list(client):

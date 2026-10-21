@@ -33,21 +33,32 @@ groups:
     assert cfg.group("web").tools == ["playwright.navigate"]
 
 
-def test_env_header_resolution(tmp_path):
+def test_env_header_substitution(tmp_path):
     p = write_yaml(
         tmp_path,
         """
 servers:
   - name: s
     url: http://s/mcp
-    auth:
-      headers:
-        X-API-Key: MY_KEY_VAR
+    headers:
+      - X-API-Key: ${MY_KEY_VAR}
 """,
     )
     cfg = load_config(p, env={"MY_KEY_VAR": "secret-value"})
-    headers = cfg.server("s").auth.headers.resolve(env={"MY_KEY_VAR": "secret-value"})
-    assert headers == {"X-API-Key": "secret-value"}
+    assert cfg.server("s").header_map == {"X-API-Key": "secret-value"}
+
+
+def test_env_substitution_in_url(tmp_path):
+    p = write_yaml(
+        tmp_path,
+        """
+servers:
+  - name: s
+    url: https://s/mcp?token=${TOKEN}
+""",
+    )
+    cfg = load_config(p, env={"TOKEN": "abc123"})
+    assert cfg.server("s").url == "https://s/mcp?token=abc123"
 
 
 def test_missing_env_raises(tmp_path):
@@ -57,13 +68,27 @@ def test_missing_env_raises(tmp_path):
 servers:
   - name: s
     url: http://s/mcp
-    auth:
-      headers:
-        Authorization: "Bearer NOPE"
+    headers:
+      - Authorization: Bearer ${MISSING_VAR}
 """,
     )
     with pytest.raises(ConfigError):
         load_config(p, env={})
+
+
+def test_plain_header_no_env(tmp_path):
+    p = write_yaml(
+        tmp_path,
+        """
+servers:
+  - name: s
+    url: http://s/mcp
+    headers:
+      - X-Static: value
+""",
+    )
+    cfg = load_config(p, env={})
+    assert cfg.server("s").header_map == {"X-Static": "value"}
 
 
 def test_duplicate_server_names_rejected(tmp_path):

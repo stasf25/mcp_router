@@ -1,60 +1,62 @@
 """Конфигурация mcp_router: загрузка/валидация/сохранение config.yaml.
 
-В config.yaml секреты хранятся как ИМЕНА переменных окружения (строки).
-При загрузке эти имена резолвятся в реальные значения из ``os.environ``.
+Секреты передаются через ``${ENV_VAR}``-подстановку: перед парсингом YAML
+во всём тексте конфига ``${VAR}`` заменяются значениями из окружения.
+Это покрывает и ``url`` (например токен в query), и значения ``headers``.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 CONFIG_PATH_ENV = "MCP_ROUTER_CONFIG"
 
-
-class AuthHeaders(BaseModel):
-    """Произвольные заголовки аутентификации. Значения — имена env-переменных."""
-
-    model_config = ConfigDict(extra="allow")
-
-    def resolve(self, env: dict[str, str] | None = None) -> dict[str, str]:
-        """Резолвит имена env-переменных в реальные значения заголовков."""
-        env = env if env is not None else os.environ
-        resolved: dict[str, str] = {}
-        for name, value in self.model_dump().items():
-            if isinstance(value, str) and value.startswith("env:"):
-                env_name = value[4:]
-                if env_name not in env:
-                    raise ConfigError(
-                        f"Переменная окружения '{env_name}' не найдена (заголовок '{name}')"
-                    )
-                resolved[name] = env[env_name]
-            elif isinstance(value, str):
-                env_name = value
-                if env_name not in env:
-                    raise ConfigError(
-                        f"Переменная окружения '{env_name}' не найдена (заголовок '{name}')"
-                    )
-                resolved[name] = env[env_name]
-            else:
-                resolved[name] = value
-        return resolved
+_ENV_VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
-class Auth(BaseModel):
-    headers: AuthHeaders | None = None
+def expand_env(text: str, env: dict[str, str]) -> str:
+    """Заменяет все ``${VAR}`` во ``text`` значениями из ``env``.
+
+    Бросает ``ConfigError``, если какая-либо переменная не найдена.
+    """
+    missing: set[str] = set()
+
+    def _sub(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name not in env:
+            missing.add(name)
+            return match.group(0)
+        return env[name]
+
+    result = _ENV_VAR_RE.sub(_sub, text)
+    if missing:
+        raise ConfigError(
+            "Переменные окружения не найдены: " + ", ".join(sorted(missing))
+        )
+    return result
 
 
 class ServerConfig(BaseModel):
     name: str
     url: str
-    auth: Auth | None = None
+    headers: list[dict[str, str]] = Field(default_factory=list)
     enabled: bool = True
     timeout: float = Field(default=30.0, gt=0)
+
+    @property
+    def header_map(self) -> dict[str, str]:
+        """Заголовки как плоский словарь (последний дубликат побеждает)."""
+        merged: dict[str, str] = {}
+        for h in self.headers:
+            for k, v in h.items():
+                merged[k] = v
+        return merged
 
     @model_validator(mode="after")
     def _validate_url(self) -> "ServerConfig":
@@ -103,7 +105,8 @@ def load_config(
 ) -> RouterConfig:
     """Загружает и валидирует конфиг из YAML-файла.
 
-    Резолвит имена env-переменных в значения заголовков аутентификации.
+    Во всём тексте конфига выполняется ``${ENV_VAR}``-подстановка из окружения
+    (fail fast на отсутствующих переменных), затем файл парсится как YAML.
     """
     env = env if env is not None else os.environ
     if path is None:
@@ -113,15 +116,9 @@ def load_config(
     if not path.is_file():
         raise ConfigError(f"Файл конфигурации не найден: {path}")
 
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    cfg = RouterConfig.model_validate(raw)
-    # Валидация на этапе загрузки: имена env-переменных для заголовков auth
-    # должны существовать в окружении. Значения в модель не сохраняются
-    # (в config хранятся только имена).
-    for server in cfg.servers:
-        if server.auth and server.auth.headers:
-            server.auth.headers.resolve(env=env)
-    return cfg
+    text = expand_env(path.read_text(encoding="utf-8"), env)
+    raw = yaml.safe_load(text) or {}
+    return RouterConfig.model_validate(raw)
 
 
 def config_to_dict(cfg: RouterConfig) -> dict[str, Any]:

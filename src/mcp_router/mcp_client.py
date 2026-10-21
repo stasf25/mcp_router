@@ -23,6 +23,13 @@ from .registry import Registry, ServerStatus
 
 logger = structlog.get_logger()
 
+# Read timeout для долгоживущего GET-стрима (server-initiated события).
+# Равен рекомендации SDK (MCP_DEFAULT_SSE_READ_TIMEOUT): 300s, т.к. сервер
+# может долго держать стрим открытым без событий. Использование короткого
+# read timeout (например server.timeout=30) заставляло httpx закрывать стрим
+# каждые 30s, вызывая бесконечные реконнекты.
+SSE_READ_TIMEOUT = 300.0
+
 
 def is_sse_url(url: str) -> bool:
     """Определяет транспорт по URL: SSE, если путь оканчивается на /sse, иначе streamable HTTP."""
@@ -77,7 +84,6 @@ class DownstreamClient:
         self._client: Client | None = None
         self._http: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()
-        self.last_latency_ms: float | None = None
         self.last_error: str | None = None
 
     async def connect(self) -> None:
@@ -99,7 +105,7 @@ class DownstreamClient:
         self._http = httpx.AsyncClient(
             base_url=self.server.url,
             headers=self.headers,
-            timeout=httpx.Timeout(self.server.timeout),
+            timeout=httpx.Timeout(self.server.timeout, read=SSE_READ_TIMEOUT),
         )
         return streamable_http_client(self.server.url, http_client=self._http)
 
@@ -108,22 +114,6 @@ class DownstreamClient:
         if self.breaker.is_open:
             return ServerStatus.ERROR
         return ServerStatus.CONNECTED if self._client is not None else ServerStatus.DISCONNECTED
-
-    async def ping(self) -> bool:
-        client = self._client
-        if client is None:
-            return False
-        start = time.monotonic()
-        try:
-            await client.send_ping()
-            self.last_latency_ms = round((time.monotonic() - start) * 1000, 2)
-            self.breaker.record_success()
-            self.last_error = None
-            return True
-        except Exception as exc:  # noqa: BLE001
-            self.breaker.record_failure()
-            self.last_error = str(exc)
-            return False
 
     async def list_tools(self) -> list[MCPTool]:
         client = self._require_client()
@@ -181,7 +171,7 @@ class ClientPool:
 
     async def start(self) -> None:
         for server in self.registry.enabled_servers():
-            headers = server.auth.headers.resolve() if server.auth and server.auth.headers else {}
+            headers = server.header_map
             dc = DownstreamClient(server, headers)
             self._clients[server.name] = dc
             try:
@@ -196,18 +186,14 @@ class ClientPool:
         while True:
             await asyncio.sleep(self._health_interval)
             for name, dc in list(self._clients.items()):
-                try:
-                    ok = await dc.ping()
-                except Exception:  # noqa: BLE001
-                    ok = False
-                status = ServerStatus.CONNECTED if ok else ServerStatus.ERROR
+                # Активных сетевых проверок не делаем: статус берём из текущего
+                # состояния подключения (dc.status), которое обновляется по факту
+                # операций (list_tools/call_tool) через circuit breaker и по
+                # живости transport/_client. Обрыв GET-стрима SDK переживает сам
+                # (авто-reconnect), поэтому он не меняет статус, пока соединение живо.
+                status = dc.status
                 self.registry.set_status(name, status)
-                logger.info(
-                    "server.health",
-                    server=name,
-                    status=status.value,
-                    latency_ms=dc.last_latency_ms,
-                )
+                logger.info("server.health", server=name, status=status.value)
 
     def is_available(self, server_name: str) -> bool:
         dc = self._clients.get(server_name)

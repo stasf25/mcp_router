@@ -100,3 +100,12 @@ async def group_tools(name: str, state: AppState = Depends(_state)) -> dict:
 @router.get("/tools")
 async def list_tools(state: AppState = Depends(_state)) -> list[dict]:
     return [_tool_payload(state.registry, t) for t in state.registry.all_tools()]
+
+
+@router.get("/tool/{qualified}")
+async def get_tool(qualified: str, state: AppState = Depends(_state)) -> dict:
+    """Полная информация по tool'у, включая json-схему вызова (input_schema)."""
+    info = state.registry.get_tool(qualified)
+    if info is None:
+        raise HTTPException(status_code=404, detail=f"Tool '{qualified}' не найден")
+    return _tool_payload(state.registry, info)

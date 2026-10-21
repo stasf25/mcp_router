@@ -1,13 +1,16 @@
 services:
   mcp_router:
     build: .
-    ports:
-      - "127.0.0.1:8000:8000"  # только localhost
+    env_file:
+      - .env
     environment:
       - MCP_ROUTER_API_KEY=${MCP_ROUTER_API_KEY:-}
       - MCP_ROUTER_JWT_SECRET=${MCP_ROUTER_JWT_SECRET:-}
       - PLAYWRIGHT_API_KEY=${PLAYWRIGHT_API_KEY:-}
       - BRIGHTDATA_TOKEN=${BRIGHTDATA_TOKEN:-}
+    ports:
+      # наружу — только на HOST_DOMAIN (по умолчанию 127.0.0.1, если в .env нет)
+      - "${HOST_DOMAIN:-127.0.0.1}:8000:8000"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:
@@ -20,8 +23,22 @@ services:
 
   playwright:
     image: mcp/playwright:latest
+    container_name: playwright
+    ports:
+      - "8931:8931"
+    entrypoint: node
+    command: >
+      /app/cli.js
+      --headless
+      --browser chromium
+      --no-sandbox
+      --port 8931
+      --host 0.0.0.0
+      --allowed-hosts *
+    shm_size: '1gb'
     networks:
       - mcp_net
+    restart: unless-stopped
 
 networks:
   mcp_net:
