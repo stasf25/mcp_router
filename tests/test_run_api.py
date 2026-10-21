@@ -107,3 +107,24 @@ async def test_mcp_jwt_invalid_returns_empty(router_url):
         ) as c:
             res = await c.list_tools()
             assert res.tools == []
+
+
+@pytest.mark.anyio
+async def test_mcp_jwt_header_scopes_call_tool(router_url):
+    """JWT в header фильтрует и tools/call: вызов tool вне скоупа отклоняется."""
+    token = httpx.post(
+        f"{router_url}/run/select",
+        json={"tools": ["mock.click"]},
+    ).json()["token"]
+    async with httpx.AsyncClient(
+        headers={"Authorization": f"Bearer {token}"}
+    ) as http:
+        async with Client(
+            streamable_http_client(f"{router_url}/mcp", http_client=http)
+        ) as c:
+            # tool в скоупе — доступен
+            ok = await c.call_tool("mock.click", {"selector": "#x"})
+            assert ok.is_error is False
+            # tool вне скоупа — отклоняется
+            bad = await c.call_tool("mock.navigate", {"url": "https://example.com"})
+            assert bad.is_error is True

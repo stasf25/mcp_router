@@ -87,7 +87,22 @@ class ScopedMCPServer(MCPServer):
             if url.query:
                 parsed = parse_qs(url.query)
                 query = {k: v[0] for k, v in parsed.items()}
-            ctx = RequestCtx(path=path, headers={}, query=query)
+            # Заголовки исходного запроса: у anyio-Request есть .headers (mapping),
+            # ключи в lowercase; для некоторых запросов — через .scope.
+            headers: dict[str, str] = {}
+            request = context.request_context.request
+            raw_headers = getattr(request, "headers", None)
+            if raw_headers is not None:
+                try:
+                    headers = {k.lower(): v for k, v in raw_headers.items()}
+                except Exception:  # noqa: BLE001
+                    headers = {}
+            elif hasattr(request, "scope"):
+                headers = {
+                    k.decode("latin-1").lower(): v.decode("latin-1")
+                    for k, v in request.scope.get("headers", [])
+                }
+            ctx = RequestCtx(path=path, headers=headers, query=query)
         else:
             ctx = _REQUEST_CTX.get()
             path = ctx.path if ctx else ""
