@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from . import admin, api, run_api
 from .config import load_config
 from .mcp_server import MCP_MOUNT, ScopedMCPServer, build_mcp_app
+from .metrics import MetricsMiddleware, metrics_endpoint, set_server_status
 from .registry import ServerStatus, ToolInfo
 from .state import AppState
 
@@ -37,6 +38,10 @@ async def discover_tools(state: AppState) -> None:
         except Exception as exc:  # noqa: BLE001
             state.registry.set_status(server.name, ServerStatus.ERROR)
             logger.warning("server.discover_failed", server=server.name, error=str(exc))
+    # Инициализация gauge статусов для всех включённых серверов (в т.ч. не
+    # затронутых выше — отражаем текущее состояние реестра).
+    for server in state.registry.enabled_servers():
+        set_server_status(server.name, state.registry.status(server.name).value)
 
 
 def create_app(config_path: str | Path | None = None) -> FastAPI:
@@ -69,6 +74,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.app = state
+    app.add_middleware(MetricsMiddleware)
+    app.add_api_route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False)
     app.mount(MCP_MOUNT, mcp_app, name="mcp")
     app.include_router(api.router)
     app.include_router(run_api.router)

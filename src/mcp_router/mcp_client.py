@@ -19,6 +19,7 @@ from mcp_types import CallToolResult
 from mcp_types import Tool as MCPTool
 
 from .config import ServerConfig
+from .metrics import record_tool_call
 from .registry import Registry, ServerStatus
 
 logger = structlog.get_logger()
@@ -128,13 +129,17 @@ class DownstreamClient:
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
         client = self._require_client()
+        start = time.monotonic()
         try:
             result = await client.call_tool(name, arguments)
             self.breaker.record_success()
+            is_error = bool(getattr(result, "is_error", False))
+            record_tool_call(self.server.name, name, time.monotonic() - start, is_error)
             return result
         except Exception as exc:  # noqa: BLE001
             self.breaker.record_failure()
             self.last_error = str(exc)
+            record_tool_call(self.server.name, name, time.monotonic() - start, True)
             raise
 
     def _require_client(self) -> Client:

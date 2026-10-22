@@ -13,6 +13,7 @@ from enum import Enum
 from mcp_types import Tool as MCPTool
 
 from .config import GroupConfig, ServerConfig
+from .metrics import set_server_status, set_server_tools
 
 
 class ServerStatus(str, Enum):
@@ -109,6 +110,7 @@ class Registry:
     def set_status(self, name: str, status: ServerStatus) -> None:
         if name in self._status:
             self._status[name] = status
+            set_server_status(name, status.value)
 
     def server_available(self, name: str) -> bool:
         return self._status.get(name) == ServerStatus.CONNECTED
@@ -117,11 +119,14 @@ class Registry:
 
     def register_tool(self, info: ToolInfo) -> None:
         self._tools[info.qualified] = info
-        self._server_tools.setdefault(info.server, []).append(info)
+        lst = self._server_tools.setdefault(info.server, [])
+        lst.append(info)
+        set_server_tools(info.server, len(lst))
 
     def clear_server_tools(self, server: str) -> None:
         for t in self._server_tools.pop(server, []):
             self._tools.pop(t.qualified, None)
+        set_server_tools(server, 0)
 
     def get_tool(self, qualified: str) -> ToolInfo | None:
         return self._tools.get(qualified)

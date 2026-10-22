@@ -13,7 +13,7 @@ python -m pytest -q    # полный прогон тестов
 ruff check src tests   # линтер
 ```
 
-Ожидаемый результат: **61 passed**, ruff — без замечаний.
+Ожидаемый результат: **67 passed**, ruff — без замечаний.
 
 ### Полезные варианты запуска
 
@@ -46,6 +46,7 @@ python -m pytest -q --disable-warnings    # без предупреждений
 | `test_api.py` | REST-эндпоинты админки `/api/*`: health, servers, groups, tools, tool detail, 404 |
 | `test_contract.py` | Контрактные тесты MCP-протокола через внешний `Client` (`mcp` SDK): handshake, `tools/list` на `/mcp`, `/mcp/{group}`, `/mcp/{server}.{tool}`, `tools/call`, ошибка для tool вне скоупа, эндпоинт tool detail, админка |
 | `test_run_api.py` | Этап 3: JWT (`jwt_service`), `/run/select` (пустой список → все tools, 400 на отсутствующие/недоступные), `/run/select/{group}` (404 на группу, пустой → вся группа, 400 на tools вне группы), `/run/tool/call`, JWT-фильтрация на `/mcp` через header и query (для `list_tools` и `call_tool`), невалидный JWT |
+| `test_metrics.py` | Prometheus-метрики: `/metrics` отдаёт exposition, `mcp_router_tool_calls_total` пишется и через `/run/tool/call`, и через MCP `tools/call` на `/mcp`, gauge статусов серверов, HTTP-метрика с нормализацией пути, unit-тесты `normalize_path` |
 
 ---
 
@@ -83,6 +84,8 @@ python -m pytest -q --disable-warnings    # без предупреждений
 3. **Контрактные** (`test_contract.py`): полный MCP-протокол через внешний
    `Client` из `mcp` SDK — handshake, tools/list, tools/call на реальных портах.
 4. **Run-тесты этапа 3** (`test_run_api.py`): JWT + `/run/*` + фильтрация на `/mcp`.
+5. **Метрики** (`test_metrics.py`): `/metrics`, счётчики вызовов tools, gauge
+   статусов, нормализация HTTP-путей (через `router_url`).
 
 ---
 
