@@ -31,6 +31,14 @@ def test_jwt_wrong_secret_raises():
         JWTService(secret="x" * 32).decode(token)
 
 
+def test_jwt_empty_tools_means_all():
+    svc = JWTService(secret=_SECRET)
+    token = svc.issue([], ttl=60)
+    assert svc.decode(token) == ["*"]
+    token_none = svc.issue(None, ttl=60)
+    assert svc.decode(token_none) == ["*"]
+
+
 def test_run_select_returns_openai_tools(router_url):
     r = httpx.post(
         f"{router_url}/run/select",
@@ -44,6 +52,72 @@ def test_run_select_returns_openai_tools(router_url):
     assert body["tools"][0]["type"] == "function"
     # tools перечислены в OpenAI-формате
     assert "parameters" in body["tools"][0]["function"]
+
+
+def test_run_select_no_payload_returns_all(router_url):
+    r = httpx.post(f"{router_url}/run/select", json={})
+    assert r.status_code == 200
+    body = r.json()
+    names = [t["function"]["name"] for t in body["tools"]]
+    assert names == ["mock.navigate", "mock.click", "mock.screenshot"]
+
+
+def test_run_select_empty_list_returns_all(router_url):
+    r = httpx.post(f"{router_url}/run/select", json={"tools": []})
+    assert r.status_code == 200
+    body = r.json()
+    names = [t["function"]["name"] for t in body["tools"]]
+    assert names == ["mock.navigate", "mock.click", "mock.screenshot"]
+
+
+def test_run_select_missing_tool_400(router_url):
+    r = httpx.post(
+        f"{router_url}/run/select",
+        json={"tools": ["mock.navigate", "mock.nope"]},
+    )
+    assert r.status_code == 400
+    assert "mock.nope" in r.json()["detail"]
+
+
+def test_run_select_group_not_found_404(router_url):
+    r = httpx.post(f"{router_url}/run/select/nope", json={"tools": []})
+    assert r.status_code == 404
+
+
+def test_run_select_group_empty_returns_whole_group(router_url):
+    r = httpx.post(f"{router_url}/run/select/web", json={})
+    assert r.status_code == 200
+    body = r.json()
+    names = [t["function"]["name"] for t in body["tools"]]
+    assert names == ["mock.navigate", "mock.click"]
+
+
+def test_run_select_group_tool_outside_400(router_url):
+    # mock.screenshot не входит в группу web
+    r = httpx.post(
+        f"{router_url}/run/select/web",
+        json={"tools": ["mock.navigate", "mock.screenshot"]},
+    )
+    assert r.status_code == 400
+    assert "mock.screenshot" in r.json()["detail"]
+
+
+def test_run_select_group_subset_ok(router_url):
+    r = httpx.post(
+        f"{router_url}/run/select/web",
+        json={"tools": ["mock.click"]},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    names = [t["function"]["name"] for t in body["tools"]]
+    assert names == ["mock.click"]
+
+
+def test_run_select_group_screens_whole(router_url):
+    r = httpx.post(f"{router_url}/run/select/screens", json={})
+    assert r.status_code == 200
+    names = [t["function"]["name"] for t in r.json()["tools"]]
+    assert names == ["mock.screenshot"]
 
 
 def test_run_tool_call_direct(router_url):
@@ -95,6 +169,38 @@ async def test_mcp_jwt_via_query_token(router_url):
     ) as c:
         res = await c.list_tools()
         assert [t.name for t in res.tools] == ["screenshot"]
+
+
+@pytest.mark.anyio
+async def test_mcp_jwt_empty_means_all(router_url):
+    """Пустой /run/select даёт JWT-агрегатор: на /mcp отдаются все tools."""
+    token = httpx.post(f"{router_url}/run/select", json={}).json()["token"]
+    async with httpx.AsyncClient(
+        headers={"Authorization": f"Bearer {token}"}
+    ) as http:
+        async with Client(
+            streamable_http_client(f"{router_url}/mcp", http_client=http)
+        ) as c:
+            res = await c.list_tools()
+            got = {t.name for t in res.tools}
+            assert got - {"navigate", "click", "screenshot"} == set()
+            assert {"navigate", "click", "screenshot"} - got == set()
+
+
+@pytest.mark.anyio
+async def test_mcp_jwt_group_empty_means_group_all(router_url):
+    """Пустой /run/select/{group} даёт JWT на всю группу."""
+    token = httpx.post(f"{router_url}/run/select/web", json={}).json()["token"]
+    async with httpx.AsyncClient(
+        headers={"Authorization": f"Bearer {token}"}
+    ) as http:
+        async with Client(
+            streamable_http_client(f"{router_url}/mcp", http_client=http)
+        ) as c:
+            res = await c.list_tools()
+            got = {t.name for t in res.tools}
+            assert got - {"navigate", "click"} == set()
+            assert {"navigate", "click"} - got == set()
 
 
 @pytest.mark.anyio

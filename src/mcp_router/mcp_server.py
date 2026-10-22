@@ -17,7 +17,7 @@ from mcp_types import CallToolResult
 from mcp_types import Tool as MCPTool
 from starlette.applications import Starlette
 
-from .jwt_service import JWTError, JWTService
+from .jwt_service import ALL_TOOLS, JWTError, JWTService
 from .mcp_client import ClientPool
 from .registry import FilterSpec, Registry
 
@@ -114,6 +114,9 @@ class ScopedMCPServer(MCPServer):
                 # Невалидный/просроченный JWT — по умолчанию безопасно не отдаём
                 # ничего (принудительно пустой скоуп), вместо режима агрегатора.
                 return FilterSpec(mode="jwt", tools=frozenset())
+            if ALL_TOOLS in tools:
+                # Токен «все tools» — режим агрегатора.
+                return FilterSpec.all()
             return FilterSpec.jwt(tools)
         return _spec_from_path(path)
 

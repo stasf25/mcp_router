@@ -17,23 +17,37 @@ import jwt
 JWT_SECRET_ENV = "MCP_ROUTER_JWT_SECRET"
 _JWT_ALG = "HS256"
 
+# Специальный маркер в payload: если tools == [ALL_TOOLS], токен означает
+# «все доступные tools» (режим агрегатора). Используется, чтобы отличать
+# пустой/отсутствующий список (-> все) от подмножества по именам.
+ALL_TOOLS = "*"
+
 
 class JWTError(Exception):
     """Ошибка JWT: невалидная подпись, просрочен, отсутствует payload."""
 
 
 class JWTService:
-    """Выпускает и проверяет JWT с набором tools в payload."""
+    """Выпускает и проверяет JWT с набором tools в payload.
+
+    ``issue(tools)``: пустой список/None кодируется как ``["*"]`` (все tools);
+    непустой — как есть. ``decode`` возвращает ``["*"]`` для режима агрегатора.
+    """
 
     def __init__(self, secret: str | None = None) -> None:
         self._secret = secret or os.environ.get(JWT_SECRET_ENV) or secrets.token_urlsafe(32)
 
-    def issue(self, tools: list[str], ttl: int) -> str:
+    def issue(self, tools: list[str] | None, ttl: int) -> str:
+        if not tools:
+            tools = [ALL_TOOLS]
         payload: dict[str, Any] = {"tools": tools, "exp": int(time.time()) + max(ttl, 0)}
         return jwt.encode(payload, self._secret, algorithm=_JWT_ALG)
 
     def decode(self, token: str) -> list[str]:
-        """Проверяет подпись и exp, возвращает список tools из payload."""
+        """Проверяет подпись и exp, возвращает список tools из payload.
+
+        Возвращает ``["*"]`` для режима агрегатора (пустой/отсутствующий список).
+        """
         try:
             payload = jwt.decode(token, self._secret, algorithms=[_JWT_ALG])
         except jwt.ExpiredSignatureError as exc:
@@ -43,4 +57,6 @@ class JWTService:
         tools = payload.get("tools")
         if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
             raise JWTError("JWT не содержит корректный список tools")
+        if not tools:
+            return [ALL_TOOLS]
         return tools

@@ -13,7 +13,7 @@ python -m pytest -q    # полный прогон тестов
 ruff check src tests   # линтер
 ```
 
-Ожидаемый результат: **50 passed**, ruff — без замечаний.
+Ожидаемый результат: **61 passed**, ruff — без замечаний.
 
 ### Полезные варианты запуска
 
@@ -45,7 +45,7 @@ python -m pytest -q --disable-warnings    # без предупреждений
 | `test_registry.py` | Единичные (unit) тесты `Registry`/`FilterSpec`: фильтрация `all`/`group`/`single`/`jwt`, доступность tools |
 | `test_api.py` | REST-эндпоинты админки `/api/*`: health, servers, groups, tools, tool detail, 404 |
 | `test_contract.py` | Контрактные тесты MCP-протокола через внешний `Client` (`mcp` SDK): handshake, `tools/list` на `/mcp`, `/mcp/{group}`, `/mcp/{server}.{tool}`, `tools/call`, ошибка для tool вне скоупа, эндпоинт tool detail, админка |
-| `test_run_api.py` | Этап 3: JWT (`jwt_service`), `/run/select`, `/run/tool/call`, JWT-фильтрация на `/mcp` через header и query (для `list_tools` и `call_tool`), невалидный JWT |
+| `test_run_api.py` | Этап 3: JWT (`jwt_service`), `/run/select` (пустой список → все tools, 400 на отсутствующие/недоступные), `/run/select/{group}` (404 на группу, пустой → вся группа, 400 на tools вне группы), `/run/tool/call`, JWT-фильтрация на `/mcp` через header и query (для `list_tools` и `call_tool`), невалидный JWT |
 
 ---
 

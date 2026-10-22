@@ -1,6 +1,8 @@
 """Runtime REST API (этап 3): выдача JWT-скоупа и прямой вызов инструментов.
 
-- ``POST /run/select``  — возвращает JWT + tools в OpenAI-формате по списку имён.
+- ``POST /run/select`` — JWT на подмножество tools (или все, если список пуст).
+- ``POST /run/select/{group}`` — JWT на подмножество tools из заданной группы
+  (или вся группа, если список пуст).
 - ``POST /run/tool/call`` — прямой вызов инструмента без MCP-клиента (ответ строкой).
 """
 
@@ -22,7 +24,7 @@ def _state(request: Request) -> AppState:
 
 
 class SelectRequest(BaseModel):
-    tools: list[str]
+    tools: list[str] | None = None
     ttl: int = Field(default=3600, ge=0)
 
 
@@ -31,17 +33,73 @@ class CallRequest(BaseModel):
     arguments: dict = Field(default_factory=dict)
 
 
+def _to_openai(registry: Registry, qualified: str) -> dict:
+    return registry.get_tool(qualified).to_openai()
+
+
+def _select_response(state: AppState, tools: list[str], ttl: int) -> dict:
+    token = state.jwt.issue(tools, ttl)
+    payload = [_to_openai(state.registry, q) for q in tools]
+    return {"token": token, "expires_at": None, "tools": payload}
+
+
+def _check_available(state: AppState, tools: list[str]) -> list[str]:
+    """Возвращает tools, сервер которых недоступен (или tool не найден в реестре)."""
+    out = []
+    for q in tools:
+        info = state.registry.get_tool(q)
+        if info is None or not state.registry.server_available(info.server):
+            out.append(q)
+    return out
+
+
 @router.post("/select")
 async def select_tools(req: SelectRequest, state: AppState = Depends(_state)) -> dict:
-    """Выпускает JWT на подмножество tools и возвращает их в OpenAI-формате."""
-    token = state.jwt.issue(req.tools, req.ttl)
+    """Выпускает JWT на tools. Пустой/отсутствующий список — режим агрегатора (все tools)."""
+    if not req.tools:
+        token = state.jwt.issue(None, req.ttl)
+        payload = [_to_openai(state.registry, t.qualified) for t in state.registry.all_tools()]
+        return {"token": token, "expires_at": None, "tools": payload}
+    return await _select_subset(state, req.tools, req.ttl, state.registry)
+
+
+async def _select_subset(
+    state: AppState,
+    tools: list[str],
+    ttl: int,
+    registry: Registry,
+    valid: set[str] | None = None,
+) -> dict:
+    """Общая логика для подмножества tools: валидация + проверка доступности."""
+    if valid is not None:
+        missing = [q for q in tools if q not in valid]
+    else:
+        missing = [q for q in tools if registry.get_tool(q) is None]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Tools не найдены: {missing}")
+    unavailable = _check_available(state, tools)
+    if unavailable:
+        raise HTTPException(status_code=400, detail=f"Tools недоступны: {unavailable}")
+    return _select_response(state, tools, ttl)
+
+
+@router.post("/select/{group}")
+async def select_group_tools(
+    group: str, req: SelectRequest, state: AppState = Depends(_state)
+) -> dict:
+    """Выпускает JWT на tools из заданной группы. Пустой список — вся группа."""
     registry: Registry = state.registry
-    tools = []
-    for qualified in req.tools:
-        info = registry.get_tool(qualified)
-        if info is not None:
-            tools.append(info.to_openai())
-    return {"token": token, "expires_at": None, "tools": tools}
+    group_cfg = registry.groups.get(group)
+    if group_cfg is None:
+        raise HTTPException(status_code=404, detail=f"Группа '{group}' не найдена")
+    valid = set(group_cfg.tools)
+    if not req.tools:
+        tools = [q for q in group_cfg.tools if registry.get_tool(q) is not None]
+        unavailable = _check_available(state, tools)
+        if unavailable:
+            raise HTTPException(status_code=400, detail=f"Tools недоступны: {unavailable}")
+        return _select_response(state, tools, req.ttl)
+    return await _select_subset(state, req.tools, req.ttl, registry, valid=valid)
 
 
 @router.post("/tool/call")
