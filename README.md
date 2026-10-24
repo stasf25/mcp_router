@@ -7,7 +7,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![MCP 2.3.0](https://img.shields.io/badge/MCP-2.3.0-green.svg)](https://modelcontextprotocol.io/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Tests](https://img.shields.io/badge/tests-69%20passed-brightgreen.svg)](test_suite.md)
+[![Tests](https://img.shields.io/badge/tests-78%20passed-brightgreen.svg)](test_suite.md)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)](https://fastapi.tiangolo.com/)
 
 </div>
@@ -494,7 +494,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 **Пример использования (в `.env`):**
 
 ```ini
-MCP_ROUTER_JWT_SECRET=Zk9s2Xr4LmPq7WvY1NaBcDe3FgHj6KlM0QpRtUwSx8NcI=
+MCP_ROUTER_JWT_SECRET=Your-very-very-strong-JWT-secretc
 ```
 
 ---
