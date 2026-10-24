@@ -4,13 +4,10 @@ services:
     env_file:
       - .env
     environment:
-      - MCP_ROUTER_API_KEY=${MCP_ROUTER_API_KEY:-}
       - MCP_ROUTER_JWT_SECRET=${MCP_ROUTER_JWT_SECRET:-}
-      - PLAYWRIGHT_API_KEY=${PLAYWRIGHT_API_KEY:-}
-      - BRIGHTDATA_TOKEN=${BRIGHTDATA_TOKEN:-}
     ports:
       # наружу — только на HOST_DOMAIN (по умолчанию 127.0.0.1, если в .env нет)
-      - "${HOST_DOMAIN:-127.0.0.1}:8000:8000"
+      - "${HOST_DOMAIN:-127.0.0.1}:${HOST_PORT:-8000}:8000"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:
@@ -20,6 +17,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    restart: unless-stopped
 
   playwright:
     image: mcp/playwright:latest

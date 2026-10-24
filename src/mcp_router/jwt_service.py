@@ -43,6 +43,15 @@ class JWTService:
         payload: dict[str, Any] = {"tools": tools, "exp": int(time.time()) + max(ttl, 0)}
         return jwt.encode(payload, self._secret, algorithm=_JWT_ALG)
 
+    def expires_at(self, token: str) -> int | None:
+        """Возвращает Unix-время истечения токена (claim ``exp``) или None."""
+        try:
+            payload = jwt.decode(token, self._secret, algorithms=[_JWT_ALG])
+        except jwt.InvalidTokenError:
+            return None
+        exp = payload.get("exp")
+        return int(exp) if isinstance(exp, int) else None
+
     def decode(self, token: str) -> list[str]:
         """Проверяет подпись и exp, возвращает список tools из payload.
 

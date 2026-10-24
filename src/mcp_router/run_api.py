@@ -40,7 +40,8 @@ def _to_openai(registry: Registry, qualified: str) -> dict:
 def _select_response(state: AppState, tools: list[str], ttl: int) -> dict:
     token = state.jwt.issue(tools, ttl)
     payload = [_to_openai(state.registry, q) for q in tools]
-    return {"token": token, "expires_at": None, "tools": payload}
+    expires = state.jwt.expires_at(token)
+    return {"token": token, "expires_at": expires, "tools": payload}
 
 
 def _check_available(state: AppState, tools: list[str]) -> list[str]:
@@ -59,7 +60,7 @@ async def select_tools(req: SelectRequest, state: AppState = Depends(_state)) ->
     if not req.tools:
         token = state.jwt.issue(None, req.ttl)
         payload = [_to_openai(state.registry, t.qualified) for t in state.registry.all_tools()]
-        return {"token": token, "expires_at": None, "tools": payload}
+        return {"token": token, "expires_at": state.jwt.expires_at(token), "tools": payload}
     return await _select_subset(state, req.tools, req.ttl, state.registry)
 
 
@@ -104,16 +105,33 @@ async def select_group_tools(
 
 @router.post("/tool/call")
 async def tool_call(req: CallRequest, state: AppState = Depends(_state)) -> dict:
-    """Прямой вызов инструмента; результат в формате, эквивалентном MCP tools/call."""
-    if state.registry.get_tool(req.name) is None:
-        raise HTTPException(status_code=404, detail=f"Tool '{req.name}' не найден")
+    """Прямой вызов инструмента; результат в формате, эквивалентном MCP tools/call.
+
+    Всегда отвечает 200. Некорректное имя или ошибка выполнения передаются
+    внутри результата с ``isError: true`` и человекочитаемым ``content`` —
+    чтобы LLM-loop не падал на HTTP-ошибке, а модель поняла, что tool недоступен.
+    """
+    info = state.registry.get_tool(req.name)
+    if info is None:
+        return _error_result(f"Tool '{req.name}' не найден")
     try:
         result = await state.pool.call_tool(req.name, req.arguments)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return _error_result(f"Tool '{req.name}' вернул ошибку: {exc}")
     payload = {"content": result.content, "isError": result.is_error}
     dumped = json.loads(json.dumps(payload, default=_dump_content))
     return {"status": "success", "result": dumped}
+
+
+def _error_result(message: str) -> dict:
+    """Ответ об ошибке в формате, эквивалентном MCP tools/call (isError: true)."""
+    return {
+        "status": "success",
+        "result": {
+            "content": [{"type": "text", "text": message}],
+            "isError": True,
+        },
+    }
 
 
 def _dump_content(obj):

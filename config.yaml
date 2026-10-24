@@ -3,6 +3,10 @@ servers:
     url: http://playwright:8931/mcp
     enabled: true
     timeout: 30
+    circuit_breaker:
+      threshold: 5
+      window: 60
+      recovery: 30
 
   - name: brightdata
     url: https://mcp.brightdata.com/mcp

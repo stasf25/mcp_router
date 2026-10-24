@@ -42,12 +42,21 @@ def expand_env(text: str, env: dict[str, str]) -> str:
     return result
 
 
+class CircuitBreakerConfig(BaseModel):
+    """Параметры circuit breaker для одного сервера (см. mcp_client.CircuitBreaker)."""
+
+    threshold: int = Field(default=5, ge=1)
+    window: float = Field(default=60.0, gt=0)
+    recovery: float = Field(default=30.0, gt=0)
+
+
 class ServerConfig(BaseModel):
     name: str
     url: str
     headers: list[dict[str, str]] = Field(default_factory=list)
     enabled: bool = True
     timeout: float = Field(default=30.0, gt=0)
+    circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
 
     @property
     def header_map(self) -> dict[str, str]:

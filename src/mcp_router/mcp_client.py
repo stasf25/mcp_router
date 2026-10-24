@@ -1,7 +1,8 @@
 """MCP-клиент: подключение к нижестоящим MCP-серверам.
 
 Обеспечивает агрегатор подключений (по одному долгоживущему ``Client`` на сервер),
-circuit breaker, exponential backoff при реконнекте и таймауты.
+circuit breaker и таймауты. Обрывы SSE-стримов SDK переживает сам (авто-reconnect);
+при недоступности сервера требуется вмешательство оператора.
 """
 
 from __future__ import annotations
@@ -81,7 +82,10 @@ class DownstreamClient:
     def __init__(self, server: ServerConfig, headers: dict[str, str]) -> None:
         self.server = server
         self.headers = headers
-        self.breaker = CircuitBreaker()
+        cb = server.circuit_breaker
+        self.breaker = CircuitBreaker(
+            threshold=cb.threshold, window=cb.window, recovery=cb.recovery
+        )
         self._client: Client | None = None
         self._http: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()

@@ -33,6 +33,63 @@ groups:
     assert cfg.group("web").tools == ["playwright.navigate"]
 
 
+def test_circuit_breaker_defaults(tmp_path):
+    p = write_yaml(
+        tmp_path,
+        """
+servers:
+  - name: s
+    url: http://s/mcp
+""",
+    )
+    cb = load_config(p).server("s").circuit_breaker
+    assert cb.threshold == 5
+    assert cb.window == 60.0
+    assert cb.recovery == 30.0
+
+
+def test_circuit_breaker_custom(tmp_path):
+    p = write_yaml(
+        tmp_path,
+        """
+servers:
+  - name: s
+    url: http://s/mcp
+    circuit_breaker:
+      threshold: 10
+      window: 120
+      recovery: 45
+""",
+    )
+    cb = load_config(p).server("s").circuit_breaker
+    assert cb.threshold == 10
+    assert cb.window == 120.0
+    assert cb.recovery == 45.0
+
+
+def test_circuit_breaker_validation(tmp_path):
+    # threshold < 1 и неположительные window/recovery — ошибка валидации.
+    for bad in (
+        "threshold: 0",
+        "threshold: -3",
+        "window: 0",
+        "window: -5",
+        "recovery: 0",
+    ):
+        p = write_yaml(
+            tmp_path,
+            f"""
+servers:
+  - name: s
+    url: http://s/mcp
+    circuit_breaker:
+      {bad}
+""",
+        )
+        with pytest.raises(Exception):
+            load_config(p)
+
+
 def test_env_header_substitution(tmp_path):
     p = write_yaml(
         tmp_path,

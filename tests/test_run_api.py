@@ -39,6 +39,18 @@ def test_jwt_empty_tools_means_all():
     assert svc.decode(token_none) == ["*"]
 
 
+def test_jwt_expires_at_returns_exp_claim():
+    svc = JWTService(secret=_SECRET)
+    token = svc.issue(["a.b"], ttl=60)
+    exp = svc.expires_at(token)
+    import time
+
+    now = int(time.time())
+    assert now <= exp <= now + 60
+    # невалидный токен -> None
+    assert svc.expires_at("garbage") is None
+
+
 def test_run_select_returns_openai_tools(router_url):
     r = httpx.post(
         f"{router_url}/run/select",
@@ -52,6 +64,9 @@ def test_run_select_returns_openai_tools(router_url):
     assert body["tools"][0]["type"] == "function"
     # tools перечислены в OpenAI-формате
     assert "parameters" in body["tools"][0]["function"]
+    # expires_at вычисляется из ttl (Unix-время в будущем)
+    assert isinstance(body["expires_at"], int)
+    assert body["expires_at"] > 0
 
 
 def test_run_select_no_payload_returns_all(router_url):
@@ -60,6 +75,8 @@ def test_run_select_no_payload_returns_all(router_url):
     body = r.json()
     names = [t["function"]["name"] for t in body["tools"]]
     assert names == ["mock.navigate", "mock.click", "mock.screenshot"]
+    assert isinstance(body["expires_at"], int)
+    assert body["expires_at"] > 0
 
 
 def test_run_select_empty_list_returns_all(router_url):
@@ -133,12 +150,34 @@ def test_run_tool_call_direct(router_url):
     assert body["result"]["isError"] is False
 
 
-def test_run_tool_call_unknown_404(router_url):
+def test_run_tool_call_unknown_returns_error_result(router_url):
     r = httpx.post(
         f"{router_url}/run/tool/call",
         json={"name": "mock.nope", "arguments": {}},
     )
-    assert r.status_code == 404
+    # Всегда 200; ошибка передаётся внутри результата с isError: true.
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "success"
+    assert body["result"]["isError"] is True
+    texts = [c["text"] for c in body["result"]["content"]]
+    assert any("mock.nope" in t for t in texts)
+
+
+def test_run_tool_call_ttl_expires_at_matches(router_url):
+    """expires_at соответствует запрошенному ttl (Unix-время в будущем)."""
+    import time
+
+    before = int(time.time())
+    r = httpx.post(
+        f"{router_url}/run/select",
+        json={"tools": ["mock.navigate"], "ttl": 120},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    after = int(time.time())
+    # expires_at должен лежать в диапазоне [now, now + ttl]
+    assert before <= body["expires_at"] <= after + 120
 
 
 @pytest.mark.anyio
