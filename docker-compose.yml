@@ -12,6 +12,7 @@ services:
       - ./config.yaml:/app/config.yaml:ro
     networks:
       - mcp_net
+      - shared-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
@@ -41,3 +42,5 @@ services:
 networks:
   mcp_net:
     driver: bridge
+  shared-network:
+    external: ${SHARED_NETWORK:-false}

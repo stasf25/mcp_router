@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import CallToolResult
 from mcp_types import Tool as MCPTool
 from starlette.applications import Starlette
@@ -176,7 +177,28 @@ def build_mcp_app(server: ScopedMCPServer) -> Starlette:
     все подпути /mcp, /mcp/{group}, /mcp/{server}.{tool}. Middleware добавлен
     напрямую в inner-app (без обёртки), чтобы не потерять его lifespan,
     который инициализирует session manager (иначе 500 "Task group not initialized").
+
+    DNS-rebinding protection включается SDK автоматически (т.к. host по умолчанию
+    "127.0.0.1") и по умолчанию разрешает только localhost-хосты с портом. Внутри
+    docker-сети к сервису ходят по имени ``mcp_router`` и часто с голым Host
+    (без порта), поэтому расширяем список разрешённых хостов: точные имена +
+    wildcard-паттерны с портом (SDK проверяет `:*` только если в Host есть порт).
     """
-    inner = server.streamable_http_app(streamable_http_path="/{rest:path}")
+    transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            "localhost",
+            "localhost:*",
+            "mcp_router",
+            "mcp_router:*",
+            "127.0.0.1",
+            "127.0.0.1:*",
+        ],
+        allowed_origins=[],
+    )
+    inner = server.streamable_http_app(
+        streamable_http_path="/{rest:path}",
+        transport_security=transport_security,
+    )
     inner.add_middleware(CaptureContextMiddleware)
     return inner

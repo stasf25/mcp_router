@@ -87,3 +87,18 @@ def test_group_tools_list(client):
     r = client.get("/api/groups/web/list")
     assert r.status_code == 200
     assert r.json()["name"] == "web"
+
+
+def test_mcp_allowed_hosts(client):
+    """DNS-rebinding protection SDK: разрешённые хосты проходят (400 = host ок,
+    не хватает сессии), посторонний Host отклоняется 421."""
+    for host in ("mcp_router", "mcp_router:8000", "localhost", "localhost:8000",
+                 "127.0.0.1", "127.0.0.1:8000"):
+        r = client.get("/mcp/", headers={"Host": host})
+        assert r.status_code == 400, f"Host {host!r} должен пройти host-check, got {r.status_code}"
+        assert "session" in r.text.lower()
+
+
+def test_mcp_reject_unknown_host(client):
+    r = client.get("/mcp/", headers={"Host": "evil.example.com"})
+    assert r.status_code == 421

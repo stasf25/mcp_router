@@ -219,6 +219,14 @@ networks:
 
 Модель развёртывания — «один контейнер на MCP-сервер + оркестратор» в одной docker-сети; внешние MCP-серверы могут подключаться по HTTP(S).
 
+**Подключение к внешней (shared) docker-сети:** чтобы другие контейнеры на хосте (например, Dify) могли обращаться к `mcp_router` по имени сервиса, можно прикрепить его к общей docker-сети. Для этого в `.env` задайте `SHARED_NETWORK=true` (по умолчанию `false`) и предварительно создайте сеть:
+
+```
+docker network create shared-network
+```
+
+`docker-compose.yml` объявляет `shared-network` как `external: ${SHARED_NETWORK:-false}` — при `true` она подключается как внешняя, при `false` (по умолчанию) игнорируется. Убедитесь, что сеть создана до запуска, иначе Compose завершится с ошибкой.
+
 ---
 
 ## REST API
@@ -329,6 +337,8 @@ curl -X POST http://localhost:8000/run/tool/call \
 | `/mcp/{server}.{tool}` | MCP-сервер с единственным tool |
 
 **Правило разрешения подпути:** если после `/mcp/` в сегменте есть точка (`.`), он трактуется как `server.tool`; иначе — как имя группы. Точка не допускается в именах серверов и групп.
+
+**Разрешённые Host-заголовки:** на `/mcp` включена DNS-rebinding-защита MCP SDK (включается автоматически, т.к. host по умолчанию `127.0.0.1`). По умолчанию SDK пропускает только localhost-хосты, поэтому список расширен под docker-сеть — принимаются `Host: localhost`, `Host: mcp_router` и `127.0.0.1` (как с портом, так и без). Посторонний `Host` отклоняется HTTP `421 Misdirected Request`. Если клиент ходит на `/mcp` по другому имени (напр. `mcp_router.myapp`), добавьте его в `allowed_hosts` в `build_mcp_app()` (`src/mcp_router/mcp_server.py`).
 
 **JWT-фильтрация:** передайте токен из `/run/select` в `Authorization: Bearer <jwt>` или query `?token=<jwt>` — `/mcp` вернёт только tools из токена (и в `tools/list`, и в `tools/call`).
 
