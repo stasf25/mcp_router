@@ -1,6 +1,7 @@
 services:
   mcp_router:
     build: .
+    container_name: mcp_router
     env_file:
       - .env
     environment:
@@ -23,17 +24,14 @@ services:
   playwright:
     image: mcp/playwright:latest
     container_name: playwright
+    init: true # <--- Магия Docker для добавления tini
     ports:
       - "8931:8931"
-    entrypoint: node
     command: >
-      /app/cli.js
-      --headless
-      --browser chromium
-      --no-sandbox
       --port 8931
       --host 0.0.0.0
-      --allowed-hosts *
+      --allowed-hosts "*"
+      --shared-browser-context
     shm_size: '1gb'
     networks:
       - mcp_net
