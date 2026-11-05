@@ -16,11 +16,46 @@ servers:
     timeout: 30
 
 groups:
-  - name: web_scraping
+  - name: web_scrap
     tools:
       - playwright.browser_navigate
+      - playwright.browser_navigate_back
+      - playwright.browser_snapshot
       - playwright.browser_click
-      - brightdata.scrape_as_html
+      - playwright.browser_press_key
+      - playwright.browser_select_option
+      - playwright.browser_evaluate
+      - playwright.browser_run_code_unsafe
+      - playwright.browser_wait_for
+      - playwright.browser_handle_dialog
+      - brightdata.scrape_as_markdown
+    enabled: true
+
+  - name: web_send
+    tools:
+      - playwright.browser_snapshot
+      - playwright.browser_click
+      - playwright.browser_press_key
+      - playwright.browser_select_option
+      - playwright.browser_evaluate
+      - playwright.browser_handle_dialog
+      - playwright.browser_file_upload
+      - playwright.browser_drop
+      - playwright.browser_fill_form
+      - playwright.browser_type
+      - playwright.browser_drag
+    enabled: true
+
+  - name: web_debug
+    tools:
+      - playwright.browser_tabs
+      - playwright.browser_close
+      - playwright.browser_hover
+      - playwright.browser_resize
+      - playwright.browser_console_messages
+      - playwright.browser_network_requests
+      - playwright.browser_network_request
+      - playwright.browser_run_code_unsafe
     enabled: true
 
   - name: web_search
