@@ -6,8 +6,8 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![MCP 2.3.0](https://img.shields.io/badge/MCP-2.3.0-green.svg)](https://modelcontextprotocol.io/)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Tests](https://img.shields.io/badge/tests-78%20passed-brightgreen.svg)](test_suite.md)
+[![License: PN v1.0.0](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0)
+[![Tests](https://img.shields.io/badge/tests-80%20passed-brightgreen.svg)](test_suite.md)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)](https://fastapi.tiangolo.com/)
 
 </div>
@@ -565,3 +565,17 @@ MCP_ROUTER_JWT_SECRET=Your-very-very-strong-JWT-secret
 
 ---
 
+## LICENSE
+
+This project is licensed under the **PolyForm Noncommercial License 1.0.0**.
+
+You may use, modify, and distribute this software for any **noncommercial purpose** (including personal study, research, hobby projects, and use by noncommercial organizations) in accordance with the full license terms.
+
+**Commercial use requires prior written consent.** If you wish to use this software for any commercial purpose—including but not limited to running it in a for-profit environment, incorporating it into a paid product or service, or using it to generate revenue—you must obtain an explicit, written commercial license from the author.
+
+For the complete terms and conditions, please refer to the official license text:  
+[https://polyformproject.org/licenses/noncommercial/1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
+
+A copy of the full license text is also included in the [`LICENSE`](./LICENSE) file in the root of this repository.
+
+---
