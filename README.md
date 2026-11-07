@@ -2,7 +2,7 @@
 
 # mcp_router
 
-**Контейнеризированный MCP-оркестратор: агрегация, группировка и динамическая фильтрация tools для LLM**
+**Containerized MCP orchestrator: aggregation, grouping and dynamic filtering of tools for LLMs**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![MCP 2.3.0](https://img.shields.io/badge/MCP-2.3.0-green.svg)](https://modelcontextprotocol.io/)
@@ -12,81 +12,82 @@
 
 </div>
 
-Контейнеризированный MCP-оркестратор: агрегирует tools из нескольких нижестоящих MCP-серверов (например: Playwright, BrightData и др.) и отдаёт их клиенту через единый MCP-endpoint, либо через простой REST API.
+A containerized MCP orchestrator: it aggregates tools from several downstream MCP servers (e.g. Playwright, BrightData and others) and exposes them to the client through a single MCP endpoint, or through a simple REST API.
 
-Проект решает две важные задачи для бизнеса и AI-разработчиков:
+The project solves two important problems for businesses and AI developers:
 
-- **Экономия токенов LLM.** Полнофункциональные mcp-серверы могут экспонировать десятки инструментов, из которых, обычно, лишь малая часть требуется LLM для выполнения конкретного запроса. Передача в LLM полного набора инструментов с их полными json-описаниями приводит к "раздуванию" контекста и повышенному расходу входных токенов. Данный проект позволяет для каждого вызова LLM сформировать группу только необходимых tools и передать модели только их.
-- **Проксирование REST → MCP.** Прямой вызов любого MCP-инструмента одним HTTP-запросом (`/run/tool/call`) — без реализации MCP-клиента, JSON-RPC и сложных handshake. Идеально для n8n (через HTTP Request), скриптов и Python-агентов.
+- **LLM token savings.** Full-featured MCP servers can expose dozens of tools, of which usually only a small subset is required by the LLM to fulfill a specific request. Passing the full set of tools with their complete JSON descriptions to the LLM leads to "bloating" the context and increased input-token consumption. This project lets you build a group of only the required tools for each LLM call and pass only those to the model.
+- **REST → MCP proxying.** Direct invocation of any MCP tool with a single HTTP request (`/run/tool/call`) — without implementing an MCP client, JSON-RPC or complex handshakes. Ideal for n8n (via HTTP Request), scripts and Python agents.
 
-Реальная экономия токенов на простых запросах может достигать **10 раз** по сравнению с передачей LLM всего пула tools.
+Real token savings on simple requests can reach **10×** compared to passing the entire tool pool to the LLM.
 
 ---
 
-## 📑 Содержание
+## 📑 Table of Contents
 
-- [Возможности](#возможности)
-- [Архитектура](#архитектура)
-- [Требования](#требования)
-- [Быстрый старт](#быстрый-старт)
-  - [Предварительные требования](#предварительные-требования)
-  - [Шаг 1. Подготовка конфигурации](#шаг-1-подготовка-конфигурации-configyaml)
-  - [Шаг 2. Запуск](#шаг-2-запуск)
-  - [Шаг 3. Проверка](#шаг-3-проверка)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+  - [Prerequisites](#prerequisites)
+  - [Step 1. Configuration setup](#step-1-configuration-setup-configyaml)
+  - [Step 2. Launch](#step-2-launch)
+  - [Step 3. Verification](#step-3-verification)
+- [Dify Integration](#dify-integration)
 - [REST API](#rest-api)
-  - [Runtime (`/run/*`)](#runtime-run---для-llm-агентов-и-интеграций)
-  - [Администрирование (`/api/*`)](#администрирование-api-read-only)
-- [MCP-endpoint](#mcp-endpoint)
-- [Наблюдаемость](#наблюдаемость)
-- [Отказоустойчивость](#отказоустойчивость)
+  - [Runtime (`/run/*`)](#runtime-run---for-llm-agents-and-integrations)
+  - [Administration (`/api/*`)](#administration-api-read-only)
+- [MCP endpoint](#mcp-endpoint)
+- [Observability](#observability)
+- [Fault Tolerance](#fault-tolerance)
 - [Demo](#demo)
-- [Тестирование](#тестирование)
-- [Документация](#документация)
-- [Ограничения и решения](#ограничения-и-решения)
-- [JWT-секрет](#jwt-секрет)
+- [Testing](#testing)
+- [Documentation](#documentation)
+- [Limitations and decisions](#limitations-and-decisions)
+- [JWT secret](#jwt-secret)
 - [License](#license)
 
 ---
 
-## Возможности
+## Features
 
-- Единый MCP-endpoint `/mcp` (Streamable HTTP / SSE), совместимый с любым MCP-клиентом:
-  - `/mcp` — агрегатор tools со всех подключенных mcp-серверов;
-  - `/mcp/{group}` — tools конкретной группы;
-  - `/mcp/{server}.{tool}` — конкретный tool заданного сервера.
-- Статическая группировка tools через файл конфигурации по смысловым признакам: один tool может входить в несколько групп, в одну группу могут входить tools с различных mcp-серверов.
-- Динамическая группировка tools — нужная группировка tools может быть запрошена в runtime путем направления REST API запроса на `/run/select/*`:
-  - `POST /run/select` — выбор из всех доступных tools;
-  - `POST /run/select/{group}` — выбор из tools, входящих в группу.
-- Прямой вызов инструмента через REST API (проксирование REST → MCP): `POST /run/tool/call`.
-- Административный WEB-интерфейс на `http://localhost:8000/` (по умолчанию) + SWAGGER на `/docs`.
-- Prometheus-метрики на `/metrics`.
-- Graceful degradation: при недоступности одного сервера остальные продолжают работать.
-- Безопасность секретов: в `config.yaml` — только имена переменных окружения (`${ENV_VAR}`), реальные значения подставляются при старте.
+- Single MCP endpoint `/mcp` (Streamable HTTP / SSE), compatible with any MCP client:
+  - `/mcp` — aggregate of tools from all connected MCP servers;
+  - `/mcp/{group}` — tools of a specific group;
+  - `/mcp/{server}.{tool}` — a specific tool of a given server.
+- Static grouping of tools via a configuration file by semantic criteria: one tool can belong to several groups, and one group can contain tools from different MCP servers.
+- Dynamic grouping of tools — the required grouping can be requested at runtime by sending a REST API request to `/run/select/*`:
+  - `POST /run/select` — selection from all available tools;
+  - `POST /run/select/{group}` — selection from the tools belonging to a group.
+- Direct tool invocation via the REST API (REST → MCP proxying): `POST /run/tool/call`.
+- Administrative WEB UI at `http://localhost:8000/` (default) + SWAGGER at `/docs`.
+- Prometheus metrics at `/metrics`.
+- Graceful degradation: when one server is unavailable, the rest keep working.
+- Secret security: `config.yaml` contains only environment-variable names (`${ENV_VAR}`); the real values are substituted at startup.
 
 ---
 
-## Архитектура
+## Architecture
 
 ```
  ┌─────────────────────────────────────────────────────────────┐
- │           Потребители (Dify / n8n / Python)                 │
+ │           Consumers (Dify / n8n / Python)                   │
  └──────────────────────────┬──────────────────────────────────┘
                             │ MCP (Streamable HTTP / SSE)
                             ▼
  ┌─────────────────────────────────────────────────────────────┐
  │                      mcp_router                             │
  │  ┌───────────────────────────────────────────────────────┐  │
- │  │  MCP-endpoint /mcp (единый ScopedMCPServer):          │  │
- │  │   /mcp            — агрегатор всех tools              │  │
- │  │   /mcp/{group}       — tools группы                   │  │
- │  │   /mcp/{server}.{tool} — один tool                    │  │
+ │  │  MCP endpoint /mcp (single ScopedMCPServer):          │  │
+ │  │   /mcp            — aggregate of all tools            │  │
+ │  │   /mcp/{group}       — group tools                    │  │
+ │  │   /mcp/{server}.{tool} — a single tool                │  │
  │  └───────────────────────────────────────────────────────┘  │
  │  ┌───────────────────────────────────────────────────────┐  │
- │  │  Tool Registry + Groups (центральная логика)          │  │
+ │  │  Tool Registry + Groups (core logic)                  │  │
  │  └──────────────────────────┬────────────────────────────┘  │
  │  ┌──────────────────────────▼────────────────────────────┐  │
- │  │  MCP-Client (агрегатор подключений)                   │  │
+ │  │  MCP-Client (connection aggregator)                   │  │
  │  │  - Connection Pool per server                         │  │
  │  │  - Circuit Breaker                                    │  │
  │  └──────────────────────────┬────────────────────────────┘  │
@@ -97,39 +98,39 @@
                             │ docker network / HTTP
          ┌──────────────────┼──────────────────┐
          ▼                  ▼                  ▼
-    Playwright-MCP    BrightData-MCP    ... другие
+    Playwright-MCP    BrightData-MCP    ... others
 ```
 
-**MCP-совместимость:** эндпоинт `/mcp` ведёт себя как полноценный MCP-сервер (handshake, capabilities, `tools/list`, `tools/call`).
+**MCP compatibility:** the `/mcp` endpoint behaves as a full-featured MCP server (handshake, capabilities, `tools/list`, `tools/call`).
 
-**Stateless:** runtime-состояние не меняется через API; сервис масштабируется горизонтально. Состояние выбора tools не хранится на сервере — оно живёт в подписанном JWT (TTL в claim `exp`, подпись HMAC). Для горизонтального масштабирования (несколько реплик) обязательно задать фиксированный `MCP_ROUTER_JWT_SECRET` — иначе каждая реплика сгенерирует свой случайный секрет и не поймёт токены соседних (см. [JWT-секрет](#jwt-секрет)).
+**Stateless:** runtime state is not mutated through the API; the service scales horizontally. Tool-selection state is not stored on the server — it lives in a signed JWT (TTL in the `exp` claim, HMAC signature). For horizontal scaling (multiple replicas) you must set a fixed `MCP_ROUTER_JWT_SECRET` — otherwise each replica generates its own random secret and won't understand the tokens of its neighbours (see [JWT secret](#jwt-secret)).
 
-**Единый `ScopedMCPServer`:** фильтрация tools осуществляется на каждый запрос.
+**Single `ScopedMCPServer`:** tool filtering is done per request.
 
-**Namespacing:** уникальность имен tools обеспечивается за счет qualified-имени `server.tool`.
-
----
-
-## Требования
-
-- Python ≥ 3.10 (образ `python3.10-slim`).
-- Полный список зависимостей и их версий (FastAPI, uvicorn, `mcp==2.3.0`, pydantic, PyYAML, structlog, PyJWT, httpx, prometheus-client и др.) — в [`pyproject.toml`](pyproject.toml) (секции `[project]` и `[project.optional-dependencies]`).
-- Для локальной разработки: `pytest`, `pytest-asyncio`, `ruff` (секция `dev`).
-- Для запуска в Docker — сам Docker/Compose.
+**Namespacing:** uniqueness of tool names is ensured via the qualified name `server.tool`.
 
 ---
 
-## Быстрый старт
+## Requirements
 
-### Предварительные требования
+- Python ≥ 3.10 (`python3.10-slim` image).
+- The full list of dependencies and their versions (FastAPI, uvicorn, `mcp==2.3.0`, pydantic, PyYAML, structlog, PyJWT, httpx, prometheus-client and others) is in [`pyproject.toml`](pyproject.toml) (sections `[project]` and `[project.optional-dependencies]`).
+- For local development: `pytest`, `pytest-asyncio`, `ruff` (section `dev`).
+- For running in Docker — Docker/Compose itself.
 
-- **Docker & Docker Compose** (рекомендуется) **или** Python ≥ 3.10 для локальной сборки.
-- Доступ к MCP-серверам (Playwright, BrightData и др.) — локально в docker-сети или по HTTP(S).
-- API-ключ чат-модели для демо-приложения (OpenAI-совместимый).
+---
 
-### Шаг 1. Подготовка конфигурации (`config.yaml`)
+## Quick Start
 
-Секреты задаются через `${ENV_VAR}`-подстановку — пары ключ-значение хранятся в файле `.env` в корне проекта.
+### Prerequisites
+
+- **Docker & Docker Compose** (recommended) **or** Python ≥ 3.10 for a local build.
+- Access to MCP servers (Playwright, BrightData and others) — locally in a docker network or over HTTP(S).
+- A chat-model API key for the demo app (OpenAI-compatible).
+
+### Step 1. Configuration setup (`config.yaml`)
+
+Secrets are provided via `${ENV_VAR}` substitution — key-value pairs are stored in the `.env` file at the project root.
 
 ```yaml
 servers:
@@ -153,38 +154,38 @@ groups:
      enabled: true
 ```
 
-Заголовки аутентификации задаются в секции `headers` как список пар `Заголовок: значение` — это позволяет передавать ключ разными способами (`Authorization: Bearer ...`, `X-API-Key: ...`, токен в query-параметре URL и т.д.).
+Authentication headers are set in the `headers` section as a list of `Header: value` pairs — this lets you pass the key in different ways (`Authorization: Bearer ...`, `X-API-Key: ...`, a token in the URL query parameter, etc.).
 
-**Семантика полей конфигурации:**
+**Configuration field semantics:**
 
-- `${ENV_VAR}`-подстановка работает во всех строковых значениях `config.yaml` (и в `url`, и в `headers`, и в `name`, и в `timeout`). Пары ключ-значение хранятся в файле `.env` в корне проекта (см. [`.env.example`](.env.example)). Если переменная окружения не задана — приложение падает при старте (fail fast) с понятной ошибкой.
-- `enabled: true` — сервер подключается, его tools регистрируются и видны; при `enabled: false` сервер/группа игнорируются (не подключаются, tools не видны).
-- `timeout: 30` — таймаут вызова tool в секундах (дефолт 30).
-- Транспорт к нижестоящему серверу определяется по `url`: путь, оканчивающийся на `/sse`, — SSE; в остальных случаях — streamable HTTP. Пример: `https://host/mcp` → streamable HTTP; `https://host/sse` → SSE.
+- `${ENV_VAR}` substitution works in all string values of `config.yaml` (in `url`, `headers`, `name` and `timeout`). Key-value pairs are stored in the `.env` file at the project root (see [`.env.example`](.env.example)). If an environment variable is not set — the app fails fast at startup with a clear error.
+- `enabled: true` — the server is connected, its tools are registered and visible; with `enabled: false` the server/group is ignored (not connected, tools not visible).
+- `timeout: 30` — tool-call timeout in seconds (default 30).
+- The transport to the downstream server is determined by `url`: a path ending in `/sse` means SSE; otherwise — streamable HTTP. Example: `https://host/mcp` → streamable HTTP; `https://host/sse` → SSE.
 
-### Шаг 2. Запуск
+### Step 2. Launch
 
-#### Вариант A: Docker (рекомендуется)
+#### Option A: Docker (recommended)
 
 ```bash
 docker compose up --build
 ```
 
-#### Вариант B: Локальный запуск (для разработчиков)
+#### Option B: Local launch (for developers)
 
-Требования к версиям Python и библиотек — в [`pyproject.toml`](pyproject.toml) (`Python ≥ 3.10`).
+Python and library version requirements are in [`pyproject.toml`](pyproject.toml) (`Python ≥ 3.10`).
 
 ```bash
-pip install -e .                # или: pip install .
+pip install -e .                # or: pip install .
 uvicorn mcp_router.main:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
-### Шаг 3. Проверка
+### Step 3. Verification
 
 ```bash
-curl http://localhost:8000/api/health          # {"status": "ok"} или "degraded"
-curl http://localhost:8000/api/tools           # все известные tools
-curl http://localhost:8000/metrics             # Prometheus-метрики
+curl http://localhost:8000/api/health          # {"status": "ok"} or "degraded"
+curl http://localhost:8000/api/tools           # all known tools
+curl http://localhost:8000/metrics             # Prometheus metrics
 ```
 
 ### Docker / docker-compose
@@ -194,7 +195,7 @@ services:
    mcp_router:
      build: .
      ports:
-       - "127.0.0.1:8000:8000"      # только localhost
+       - "127.0.0.1:8000:8000"      # localhost only
      env_file:
        - .env
      volumes:
@@ -217,25 +218,80 @@ networks:
      driver: bridge
 ```
 
-Модель развёртывания — «один контейнер на MCP-сервер + оркестратор» в одной docker-сети; внешние MCP-серверы могут подключаться по HTTP(S).
+The deployment model is «one container per MCP server + orchestrator» in a single docker network; external MCP servers can connect over HTTP(S).
 
-**Подключение к внешней (shared) docker-сети:** чтобы другие контейнеры на хосте (например, Dify) могли обращаться к `mcp_router` по имени сервиса, можно прикрепить его к общей docker-сети. Для этого в `.env` задайте `SHARED_NETWORK=true` (по умолчанию `false`) и предварительно создайте сеть:
+**Joining an external (shared) docker network:** so that other containers on the host (e.g. Dify) can reach `mcp_router` by service name, you can attach it to a shared docker network. To do so, set `SHARED_NETWORK=true` (default `false`) in `.env` and create the network in advance:
 
 ```
 docker network create shared-network
 ```
 
-`docker-compose.yml` объявляет `shared-network` как `external: ${SHARED_NETWORK:-false}` — при `true` она подключается как внешняя, при `false` (по умолчанию) игнорируется. Убедитесь, что сеть создана до запуска, иначе Compose завершится с ошибкой.
+`docker-compose.yml` declares `shared-network` as `external: ${SHARED_NETWORK:-false}` — when `true` it is attached as external, when `false` (default) it is ignored. Make sure the network exists before startup, otherwise Compose will fail with an error.
+
+---
+
+## Dify Integration
+
+The core idea — **attach both `mcp_router` and the Dify containers that must reach it to a single external docker network**.
+
+All MCP requests in Dify go **through its own SSRF proxy** (squid container). So you need to attach not only `mcp_router` to the network, but also the SSRF proxy — plus allow the proxy to reach the private address of `mcp_router`.
+
+Setup order:
+
+1. **Create the shared network** (once):
+
+   ```
+   docker network create shared-network
+   ```
+
+2. **mcp_router** — enable joining the network in `.env`:
+
+   ```
+   SHARED_NETWORK=true
+   ```
+
+   (see the «Docker / docker-compose» section above; the network must exist before startup).
+
+3. **Dify** — in `docker-compose.yml`:
+
+   - declare the network as external:
+
+     ```yaml
+     networks:
+       shared-network:
+         external: true
+     ```
+
+   - attach the `ssrf_proxy` and `agent_ssrf_proxy` services to it (add `shared-network` to their `networks` list);
+
+4. **Dify** — in `.env`:
+
+   - allow the proxy to reach `mcp_router` (this is a private address that squid blocks by default):
+
+     ```
+     SSRF_PROXY_ALLOW_PRIVATE_DOMAINS=mcp_router
+     ```
+
+
+After that you can add an MCP server in Dify and connect to it. The URL can point either to the aggregate of all tools (`http://mcp_router:8000/mcp/`) or to a specific group (`http://mcp_router:8000/mcp/{group}`) — the tool set is determined by the path (see «MCP endpoint»). You can create a separate MCP server per group.
+
+### Troubleshooting common errors
+
+| Error | Where it occurs | Cause | Solution |
+| --- | --- | --- | --- |
+| `503 Service Unavailable` | `ssrf_proxy` | the proxy has no network route to `mcp_router` | attach `ssrf_proxy` to `shared-network` |
+| `403` | `ssrf_proxy` (squid) | private-address blocking `deny to_private_networks` | set `SSRF_PROXY_ALLOW_PRIVATE_DOMAINS=mcp_router` |
+| `421 Misdirected Request` | `mcp_router` | unknown `Host` header | see «Allowed Host headers» in the «MCP endpoint» section |
 
 ---
 
 ## REST API
 
-### Runtime (`/run/*`) — для LLM-агентов и интеграций
+### Runtime (`/run/*`) — for LLM agents and integrations
 
-#### Динамический выбор tools → `POST /run/select`
+#### Dynamic tool selection → `POST /run/select`
 
-Выпускает подписанный JWT на подмножество tools и возвращает их в формате OpenAI function calling — их можно передавать напрямую в LLM API без MCP-клиента.
+Issues a signed JWT for a subset of tools and returns them in OpenAI function-calling format — you can pass them directly to the LLM API without an MCP client.
 
 ```bash
 curl -X POST http://localhost:8000/run/select \
@@ -261,19 +317,19 @@ curl -X POST http://localhost:8000/run/select \
 }
 ```
 
-`expires_at` — Unix-время истечения токена, вычисляется из `ttl`.
+`expires_at` — Unix timestamp of token expiry, computed from `ttl`.
 
-**Семантика:**
+**Semantics:**
 
-- пустой/отсутствующий `tools` — режим агрегатора (все tools реестра);
-- tools не найдены в реестре → `400{"detail": "Tools не найдены: [...]"}`;
-- сервер недоступен → `400{"detail": "Tools недоступны: [...]"}`.
+- empty/missing `tools` — aggregate mode (all tools of the registry);
+- tools not found in the registry → `400{"detail": "Tools not found: [...]"}`;
+- server unavailable → `400{"detail": "Tools unavailable: [...]"}`.
 
-`POST /run/select/{group}` — то же самое, но ограничено составом группы (несуществующая группа → `404`; пустой `tools` → вся группа целиком).
+`POST /run/select/{group}` — the same, but limited to the group's composition (non-existent group → `404`; empty `tools` → the whole group).
 
-#### Проксирование REST → MCP
+#### REST → MCP proxying
 
-Ключевая фича для интеграций. Прямой вызов любого инструмента одним HTTP-запросом — без MCP-клиента, JSON-RPC и handshake.
+A key feature for integrations. Direct invocation of any tool with a single HTTP request — without an MCP client, JSON-RPC or handshake.
 
 ```bash
 curl -X POST http://localhost:8000/run/tool/call \
@@ -281,7 +337,7 @@ curl -X POST http://localhost:8000/run/tool/call \
   -d '{"name": "playwright.browser_click", "arguments": {"selector": "#submit"}}'
 ```
 
-Формат ответа эквивалентен стандартному ответу MCP `tools/call`:
+The response format is equivalent to the standard MCP `tools/call` response:
 
 ```json
 {
@@ -293,147 +349,147 @@ curl -X POST http://localhost:8000/run/tool/call \
 }
 ```
 
-**Зачем это нужно:** это позволяет строить циклы LLM `tool_calls` без необходимости писать MCP-клиента. Демонстрация использования — см. раздел [Demo](#demo).
+**Why it's needed:** it lets you build LLM `tool_calls` loops without having to write an MCP client. A usage demonstration — see the [Demo](#demo) section.
 
-**Формат ошибок.** Эндпоинт всегда отвечает `200 OK` — как при успехе, так и при некорректном/недоступном tool. Ошибка передаётся внутри результата через `isError: true` и человекочитаемый `content`. Это сделано намеренно: цикл LLM `tool_calls` не падает на HTTP-ошибке, а модель получает объяснение и может отреагировать (например, попросить выбрать другой tool).
+**Error format.** The endpoint always answers `200 OK` — both on success and on an invalid/unavailable tool. The error is passed inside the result via `isError: true` and a human-readable `content`. This is intentional: the LLM `tool_calls` loop does not fail on an HTTP error, and the model receives an explanation and can react (for example, ask to choose another tool).
 
 ```json
 {
   "status": "success",
   "result": {
-    "content": [{ "type": "text", "text": "Tool 'playwright.browser_click' вернул ошибку: ..." }],
+    "content": [{ "type": "text", "text": "Tool 'playwright.browser_click' returned an error: ..." }],
     "isError": true
   }
 }
 ```
 
-Ошибки HTTP-уровня (400/404/500) для `/run/*` используют стандартный FastAPI-формат `{"detail": "..."}` и возникают только на валидации запроса (например, неизвестная группа в `/run/select/{group}` — `404`).
+HTTP-level errors (400/404/500) for `/run/*` use the standard FastAPI format `{"detail": "..."}` and occur only on request validation (for example, an unknown group in `/run/select/{group}` — `404`).
 
-### Администрирование (`/api/*`, read-only)
+### Administration (`/api/*`, read-only)
 
-| Endpoint | Описание |
+| Endpoint | Description |
 | --- | --- |
 | `GET /api/health` | Health check (liveness + readiness) |
-| `GET /api/servers` | Список серверов со статусом (`connected` / `disconnected` / `error`) |
-| `GET /api/servers/{name}/list` | Tools конкретного сервера |
-| `GET /api/groups` | Список групп |
-| `GET /api/groups/{name}/list` | Tools группы с указанием сервера и статуса |
-| `GET /api/tools` | Все известные tools (сервер, статус, группы) |
-| `GET /api/tool/{server}.{tool}` | Полная информация по tool'у (включая `input_schema`) |
-| `GET /` | Admin SPA (минимальный UI поверх REST API) |
+| `GET /api/servers` | List of servers with status (`connected` / `disconnected` / `error`) |
+| `GET /api/servers/{name}/list` | Tools of a specific server |
+| `GET /api/groups` | List of groups |
+| `GET /api/groups/{name}/list` | Group tools with server and status |
+| `GET /api/tools` | All known tools (server, status, groups) |
+| `GET /api/tool/{server}.{tool}` | Full info on a tool (including `input_schema`) |
+| `GET /` | Admin SPA (minimal UI over the REST API) |
 
-`GET /api/health`: `{"status": "ok"}` — все enabled-серверы подключены (или их нет); `{"status": "degraded"}` — часть серверов недоступна (graceful degradation). В обоих случаях возвращается HTTP 200 (не 503), поэтому `curl -f` в docker-compose healthcheck не считает контейнер нездоровым при временной недоступности одного сервера.
+`GET /api/health`: `{"status": "ok"}` — all enabled servers are connected (or there are none); `{"status": "degraded"}` — some servers are unavailable (graceful degradation). In both cases HTTP 200 is returned (not 503), so `curl -f` in the docker-compose healthcheck does not consider the container unhealthy during a temporary unavailability of a single server.
 
 ---
 
-## MCP-endpoint
+## MCP endpoint
 
-Единый `ScopedMCPServer` монтируется на `/mcp`; набор tools определяется на каждый запрос из пути. Совместим с любым MCP-клиентом (Dify, n8n, Python MCP SDK).
+A single `ScopedMCPServer` is mounted at `/mcp`; the tool set is determined per request from the path. Compatible with any MCP client (Dify, n8n, Python MCP SDK).
 
-| Path | Поведение |
+| Path | Behavior |
 | --- | --- |
-| `/mcp` | MCP-сервер со **всеми** tools |
-| `/mcp/{group}` | MCP-сервер с tools указанной группы |
-| `/mcp/{server}.{tool}` | MCP-сервер с единственным tool |
+| `/mcp` | MCP server with **all** tools |
+| `/mcp/{group}` | MCP server with the tools of the given group |
+| `/mcp/{server}.{tool}` | MCP server with a single tool |
 
-**Правило разрешения подпути:** если после `/mcp/` в сегменте есть точка (`.`), он трактуется как `server.tool`; иначе — как имя группы. Точка не допускается в именах серверов и групп.
+**Subpath resolution rule:** if the segment after `/mcp/` contains a dot (`.`), it is treated as `server.tool`; otherwise — as a group name. Dots are not allowed in server and group names.
 
-**Разрешённые Host-заголовки:** на `/mcp` включена DNS-rebinding-защита MCP SDK (включается автоматически, т.к. host по умолчанию `127.0.0.1`). По умолчанию SDK пропускает только localhost-хосты, поэтому список расширен под docker-сеть — принимаются `Host: localhost`, `Host: mcp_router` и `127.0.0.1` (как с портом, так и без). Посторонний `Host` отклоняется HTTP `421 Misdirected Request`. Если клиент ходит на `/mcp` по другому имени (напр. `mcp_router.myapp`), добавьте его в `allowed_hosts` в `build_mcp_app()` (`src/mcp_router/mcp_server.py`).
+**Allowed Host headers:** on `/mcp` the MCP SDK's DNS-rebinding protection is enabled (it is enabled automatically because the default host is `127.0.0.1`). By default the SDK allows only localhost hosts, so the list is extended for the docker network — `Host: localhost`, `Host: mcp_router` and `127.0.0.1` are accepted (with or without a port). An unknown `Host` is rejected with HTTP `421 Misdirected Request`. If a client reaches `/mcp` under another name (e.g. `mcp_router.myapp`), add it to `allowed_hosts` in `build_mcp_app()` (`src/mcp_router/mcp_server.py`).
 
-**JWT-фильтрация:** передайте токен из `/run/select` в `Authorization: Bearer <jwt>` или query `?token=<jwt>` — `/mcp` вернёт только tools из токена (и в `tools/list`, и в `tools/call`).
+**JWT filtering:** pass the token from `/run/select` in `Authorization: Bearer <jwt>` or query `?token=<jwt>` — `/mcp` will return only the tools from the token (in both `tools/list` and `tools/call`).
 
-**Поведение `/mcp` при JWT:**
+**Behavior of `/mcp` with a JWT:**
 
-- JWT не передан — режим агрегатора (все tools);
-- невалидный/просроченный JWT — безопасный пустой скоуп: `tools/list` вернёт пустой массив, `tools/call` для любого tool — ошибку (tool вне скоупа).
+- no JWT passed — aggregate mode (all tools);
+- invalid/expired JWT — a safe empty scope: `tools/list` returns an empty array, `tools/call` returns an error for any tool (tool out of scope).
 
 ---
 
-## Наблюдаемость
+## Observability
 
-- Структурированные JSON-логи (`structlog`): `tool.call`, `server.health`, `group.select`.
-- Prometheus на `GET /metrics` (без аутентификации):
-  - `mcp_router_tool_calls_total{server, tool, status}` — счётчик вызовов tools, `status` = `ok` / `error` (покрывает и `/run/tool/call`, и MCP `tools/call`);
-  - `mcp_router_tool_calls_duration_seconds{server, tool}` — гистограмма длительности;
+- Structured JSON logs (`structlog`): `tool.call`, `server.health`, `group.select`.
+- Prometheus at `GET /metrics` (no authentication):
+  - `mcp_router_tool_calls_total{server, tool, status}` — tool-call counter, `status` = `ok` / `error` (covers both `/run/tool/call` and MCP `tools/call`);
+  - `mcp_router_tool_calls_duration_seconds{server, tool}` — duration histogram;
   - `mcp_router_server_up{server}` — `1` (connected) / `0`;
   - `mcp_router_server_status{server}` — `1`=connected, `2`=disconnected, `3`=error;
-  - `mcp_router_server_tools_total{server}` — число зарегистрированных tools;
-  - `mcp_router_http_requests_total` + `mcp_router_http_request_duration_seconds` — HTTP-метрики с нормализацией динамических путей.
+  - `mcp_router_server_tools_total{server}` — number of registered tools;
+  - `mcp_router_http_requests_total` + `mcp_router_http_request_duration_seconds` — HTTP metrics with normalization of dynamic paths.
 
-> ⚠️ **Внимание (деплой):** `/metrics` отдаётся без аутентификации. В docker-compose порт биндится на `127.0.0.1` — не публикуйте наружу, если не хотите раскрывать метрики и имена серверов.
+> ⚠️ **Caution (deployment):** `/metrics` is served without authentication. In docker-compose the port is bound to `127.0.0.1` — do not publish it externally if you do not want to expose metrics and server names.
 
 ---
 
-## Отказоустойчивость
+## Fault Tolerance
 
-- Circuit breaker на каждое подключение к MCP-серверу. Параметры настраиваются **per-server** в `config.yaml` (значения по умолчанию: `threshold=5` ошибок за окно `window=60s`, восстановление через `recovery=30s`):
+- Circuit breaker on each MCP-server connection. Parameters are configured **per-server** in `config.yaml` (default values: `threshold=5` errors per `window=60s`, recovery after `recovery=30s`):
 
   ```yaml
   servers:
     - name: playwright
       url: http://playwright:8931/mcp
       circuit_breaker:
-        threshold: 5      # ошибок за окно, чтобы разомкнуть
-        window: 60        # окно, сек
-        recovery: 30      # время до half-open, сек
+        threshold: 5      # errors per window to open
+        window: 60        # window, sec
+        recovery: 30      # time to half-open, sec
   ```
 
-- При недоступности сервера его tools помечаются недоступными, но не удаляются из реестра — остальные серверы продолжают работать (graceful degradation).
+- When a server is unavailable, its tools are marked unavailable but not removed from the registry — the other servers keep working (graceful degradation).
 
 ---
 
 ## Demo
 
-В `demo/` лежит автономное CLI-приложение `chat.py` — готовый пример того, как использовать mcp_router из Python-агента: выбор tools через `/run/select` и вызовы через `/run/tool/call`, работа с любой OpenAI-совместимой моделью.
+`demo/` contains a standalone CLI app `chat.py` — a ready-made example of using mcp_router from a Python agent: tool selection via `/run/select` and invocations via `/run/tool/call`, working with any OpenAI-compatible model.
 
-Именно здесь наглядно видно обе ценности проекта:
+This is exactly where both project values are clearly visible:
 
-- **Экономия токенов** — старт с пустым набором tools, наполнение только через `/select`;
-- **Проксирование REST → MCP** — tools исполняются через `/run/tool/call`, без MCP-клиента.
+- **Token savings** — start with an empty tool set, fill it only through `/select`;
+- **REST → MCP proxying** — tools are executed via `/run/tool/call`, without an MCP client.
 
-### Возможности demo
+### Demo features
 
-- старт с пустым набором tools; наполнение только через `/select`;
-- tools передаются модели в параметре `tools` (не в промпт) и неизменны до следующего `/select`;
-- после каждого ответа — статистика токенов (`usage`) и список реально использованных tools;
-- команды: `/select * | group | server.tool ...`, `/clear` (сброс контекста, tools сохраняются), `/help`, `/quit`/`exit`/Ctrl+D.
+- start with an empty tool set; fill it only through `/select`;
+- tools are passed to the model in the `tools` parameter (not in the prompt) and stay unchanged until the next `/select`;
+- after each response — token statistics (`usage`) and the list of actually used tools;
+- commands: `/select * | group | server.tool ...`, `/clear` (resets context, tools are kept), `/help`, `/quit`/`exit`/Ctrl+D.
 
-### Запуск demo
+### Running the demo
 
-Запустите mcp_router в отдельном окне терминала:
+Run mcp_router in a separate terminal window:
 
 ```bash
 docker compose up --build
 ```
 
-Далее:
+Then:
 
 ```bash
 pip install -r demo/requirements.txt
-cp demo/.env.example demo/.env     # заполнить параметры
+cp demo/.env.example demo/.env     # fill in the parameters
 python demo/chat.py
 ```
 
-Параметры `demo/.env`:
+`demo/.env` parameters:
 
-| Переменная | Назначение |
+| Variable | Purpose |
 | --- | --- |
-| `MCP_ROUTER_URL` | Базовый URL mcp_router (например `http://localhost:8000/`) |
-| `CHAT_MODEL_BASE_URL` | Эндпоинт чат-модели, OpenAI-совместимый (например `https://api.openai.com/v1`) |
-| `CHAT_MODEL_NAME` | Имя модели (например `gpt-4o-mini`) |
-| `CHAT_MODEL_API_KEY` | API-ключ чат-модели |
+| `MCP_ROUTER_URL` | Base URL of mcp_router (e.g. `http://localhost:8000/`) |
+| `CHAT_MODEL_BASE_URL` | Chat-model endpoint, OpenAI-compatible (e.g. `https://api.openai.com/v1`) |
+| `CHAT_MODEL_NAME` | Model name (e.g. `gpt-4o-mini`) |
+| `CHAT_MODEL_API_KEY` | Chat-model API key |
 
-### Пример сессии
+### Example session
 
 ```
 You> /select web_scraping
 Selected 3 tools: 3
 
-You> Выдай содержимое страницы https://example.com в формате md
+You> Return the content of the page https://example.com in md format
 
-Assistant> Страница загружена. Давайте посмотрим на её содержимое. Страница
-https://example.com — это стандартная демонстрационная страница IANA.
-Вот её содержимое в формате Markdown:
+Assistant> The page has been loaded. Let's look at its content. The page
+https://example.com is the standard IANA demo page.
+Here is its content in Markdown format:
 
 ---
 # Example Domain
@@ -452,71 +508,60 @@ Tools used:        playwright.browser_navigate, brightdata.scrape_as_html
 
 ---
 
-## Тестирование
+## Testing
 
-Полное описание — в [`test_suite.md`](test_suite.md). Кратко:
+Full description is in [`test_suite.md`](test_suite.md). In brief:
 
 ```bash
-source venv            # активация окружения (создаётся через `source make_venv`)
+source venv            # activate the environment (created via `source make_venv`)
 python -m pytest -q    # 78 passed
-ruff check src tests   # линтер — чисто
+ruff check src tests   # linter — clean
 ```
 
-**Уровни тестов:**
+**Test levels:**
 
-- **Unit** — `config` (включая `${ENV_VAR}`-резолвинг), `registry`, JWT.
-- **API** — все REST-эндпоинты `/api/*`.
-- **Контрактные** — полный MCP-протокол через внешний `Client` (mcp SDK): handshake, `tools/list` на `/mcp`/`/mcp/{group}`/`/mcp/{server}.{tool}`, `tools/call`.
-- **Run (этап 3)** — JWT, `/run/select`, `/run/select/{group}`, `/run/tool/call`, JWT-фильтрация на `/mcp` через header и query.
-- **Метрики** — `/metrics`, счётчики вызовов tools, gauge статусов, нормализация путей.
+- **Unit** — `config` (including `${ENV_VAR}` resolution), `registry`, JWT.
+- **API** — all REST endpoints `/api/*`.
+- **Contract** — full MCP protocol through the external `Client` (mcp SDK): handshake, `tools/list` on `/mcp`/`/mcp/{group}`/`/mcp/{server}.{tool}`, `tools/call`.
+- **Run (stage 3)** — JWT, `/run/select`, `/run/select/{group}`, `/run/tool/call`, JWT filtering on `/mcp` via header and query.
+- **Metrics** — `/metrics`, tool-call counters, status gauges, path normalization.
 
 ---
 
-## Документация
+## Documentation
 
-| Документ | Назначение |
+| Document | Purpose |
 | --- | --- |
-| [`test_suite.md`](test_suite.md) | Описание тестового набора |
+| [`test_suite.md`](test_suite.md) | Description of the test suite |
 
 ---
 
-## Ограничения и решения
+## Limitations and decisions
 
-- MCP SDK зафиксирован: `mcp==2.3.0` (интерфейс v2, `MCPServer`).
-- Транспорт к нижестоящим серверам определяется по URL (см. [Конфигурация](#шаг-1-подготовка-конфигурации-configyaml)).
+- MCP SDK is pinned: `mcp==2.3.0` (v2 interface, `MCPServer`).
+- The transport to downstream servers is determined by URL (see [Configuration](#step-1-configuration-setup-configyaml)).
 
 ---
 
-## JWT-секрет
+## JWT secret
 
-Подпись токенов — HMAC-SHA256. Секрет берётся из env `MCP_ROUTER_JWT_SECRET`; если он не задан, сервис генерирует случайный секрет при старте (валидно для одного инстанса, но не для масштабирования).
+Token signature — HMAC-SHA256. The secret is taken from the env `MCP_ROUTER_JWT_SECRET`; if it is not set, the service generates a random secret at startup (valid for a single instance, but not for scaling).
 
-Для **multi-replica** (горизонтальное масштабирование) обязательно задать фиксированный `MCP_ROUTER_JWT_SECRET` — иначе каждая реплика подпишет токены своим случайным секретом и не сможет проверить токены соседних реплик.
+For **multi-replica** (horizontal scaling) you must set a fixed `MCP_ROUTER_JWT_SECRET` — otherwise each replica signs tokens with its own random secret and cannot verify the tokens of the neighbouring replicas.
 
-**Способы генерации надёжного секрета (≥ 32 байта):**
+**Ways to generate a strong secret (≥ 32 bytes):**
 
 ```bash
 openssl rand -base64 48
-# или
+# or
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-**Пример использования (в `.env`):**
+**Example usage (in `.env`):**
 
 ```ini
-MCP_ROUTER_JWT_SECRET=Your-very-very-strong-JWT-secretc
+MCP_ROUTER_JWT_SECRET=Your-very-very-strong-JWT-secret
 ```
 
 ---
 
-## License
-
-This project is licensed under the **GNU General Public License v3.0**.
-
-Copyright (C) 2026 mcp_router contributors
-
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
