@@ -514,7 +514,7 @@ Tools used:        playwright.browser_navigate, brightdata.scrape_as_html
 
 ```bash
 source venv            # активация окружения (создаётся через `source make_venv`)
-python -m pytest -q    # 78 passed
+python -m pytest -q    # all passed
 ruff check src tests   # линтер — чисто
 ```
 

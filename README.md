@@ -514,7 +514,7 @@ Full description is in [`test_suite.md`](test_suite.md). In brief:
 
 ```bash
 source venv            # activate the environment (created via `source make_venv`)
-python -m pytest -q    # 78 passed
+python -m pytest -q    # all passed
 ruff check src tests   # linter — clean
 ```
 

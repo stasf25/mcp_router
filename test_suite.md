@@ -13,7 +13,7 @@ python -m pytest -q    # полный прогон тестов
 ruff check src tests   # линтер
 ```
 
-Ожидаемый результат: **78 passed**, ruff — без замечаний.
+Ожидаемый результат: **80 passed**, ruff — без замечаний.
 
 ### Полезные варианты запуска
 
@@ -44,7 +44,7 @@ python -m pytest -q --disable-warnings    # без предупреждений
 | `test_config.py` | Загрузка/валидация `config.yaml`: базовый конфиг, `${ENV_VAR}`-подстановка в `headers` и `url`, fail fast на отсутствующей переменной, статичный заголовок, дубли имён серверов, невалидный URL, отсутствующий файл, атомарное сохранение, сериализация, `circuit_breaker` (дефолты, кастомные значения, валидация) |
 | `test_registry.py` | Единичные (unit) тесты `Registry`/`FilterSpec`: фильтрация `all`/`group`/`single`/`jwt`, доступность tools |
 | `test_mcp_client.py` | Unit-тесты `CircuitBreaker` (открытие по порогу, сброс по успеху, half-open после recovery) и передача параметров breaker из конфига в `DownstreamClient` |
-| `test_api.py` | REST-эндпоинты админки `/api/*`: health, servers, groups, tools, tool detail, 404 |
+| `test_api.py` | REST-эндпоинты админки `/api/*`: health, servers, groups, tools, tool detail, 404; DNS-rebinding защита SDK — разрешённые Host-заголовки (`mcp_router`, `localhost`, `127.0.0.1`) проходят host-check, посторонний Host отклоняется 421 |
 | `test_contract.py` | Контрактные тесты MCP-протокола через внешний `Client` (`mcp` SDK): handshake, `tools/list` на `/mcp`, `/mcp/{group}`, `/mcp/{server}.{tool}`, `tools/call`, ошибка для tool вне скоупа, эндпоинт tool detail, админка |
 | `test_run_api.py` | Этап 3: JWT (`jwt_service`), `/run/select` (пустой список → все tools, 400 на отсутствующие/недоступные, `expires_at` вычисляется из `ttl`), `/run/select/{group}` (404 на группу, пустой → вся группа, 400 на tools вне группы), `/run/tool/call` (успех; неизвестный tool → всегда 200 с `isError: true` в результате), JWT-фильтрация на `/mcp` через header и query (для `list_tools` и `call_tool`), невалидный JWT |
 | `test_metrics.py` | Prometheus-метрики: `/metrics` отдаёт exposition, `mcp_router_tool_calls_total` пишется и через `/run/tool/call`, и через MCP `tools/call` на `/mcp`, gauge статусов серверов, HTTP-метрика с нормализацией пути, unit-тесты `normalize_path` |
