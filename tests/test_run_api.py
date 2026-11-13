@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import tempfile
+import time
+
 import httpx
 import pytest
 from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
+from mock_mcp import free_port, serve_mcp_server_on_thread
 
 from mcp_router.jwt_service import JWTError, JWTService
+from mcp_router.main import create_app
 
 _SECRET = "test-secret-0123456789abcdef0123456789abcdef"
 
@@ -273,3 +278,73 @@ async def test_mcp_jwt_header_scopes_call_tool(router_url):
             # tool вне скоупа — отклоняется
             bad = await c.call_tool("mock.navigate", {"url": "https://example.com"})
             assert bad.is_error is True
+
+
+API_KEY = "test-api-key-0123456789abcdef"
+
+
+@pytest.fixture
+def router_url_with_key(running_mock_server, monkeypatch):
+    """Роутер с заданным MCP_ROUTER_API_KEY; /run/* защищены ключом."""
+    monkeypatch.setenv("MCP_ROUTER_API_KEY", API_KEY)
+    cfg = f"""
+servers:
+  - name: mock
+    url: {running_mock_server}
+    enabled: true
+    timeout: 30
+groups:
+  - name: web
+    tools: [mock.navigate, mock.click]
+    enabled: true
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        f.write(cfg)
+        cfg_path = f.name
+    app = create_app(cfg_path)
+    port = free_port()
+    serve_mcp_server_on_thread(app, port)
+    for _ in range(80):
+        try:
+            if httpx.get(f"http://127.0.0.1:{port}/api/health").status_code != 404:
+                break
+        except Exception:
+            pass
+        time.sleep(0.1)
+    time.sleep(0.6)
+    return f"http://127.0.0.1:{port}"
+
+
+def test_run_api_key_absent_401(router_url_with_key):
+    r = httpx.post(
+        f"{router_url_with_key}/run/select",
+        json={"tools": ["mock.navigate"], "ttl": 60},
+    )
+    assert r.status_code == 401
+
+
+def test_run_api_key_wrong_401(router_url_with_key):
+    r = httpx.post(
+        f"{router_url_with_key}/run/select",
+        headers={"Authorization": "Bearer wrong-key"},
+        json={"tools": ["mock.navigate"], "ttl": 60},
+    )
+    assert r.status_code == 401
+
+
+def test_run_api_key_correct_ok(router_url_with_key):
+    r = httpx.post(
+        f"{router_url_with_key}/run/select",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"tools": ["mock.navigate"], "ttl": 60},
+    )
+    assert r.status_code == 200
+    assert "token" in r.json()
+
+
+def test_run_tool_call_requires_key(router_url_with_key):
+    r = httpx.post(
+        f"{router_url_with_key}/run/tool/call",
+        json={"name": "mock.navigate", "arguments": {"url": "https://example.com"}},
+    )
+    assert r.status_code == 401

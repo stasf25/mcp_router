@@ -38,6 +38,17 @@ def is_sse_url(url: str) -> bool:
     return url.rstrip("/").endswith("/sse")
 
 
+def mask_url(url: str) -> str:
+    """Маскирует секреты (query-параметры, токены) в URL перед логированием."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(url)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+    except ValueError:
+        return url
+
+
 class CircuitBreaker:
     """Простой circuit breaker: open после N ошибок в окне, recovery через таймаут."""
 
@@ -102,6 +113,7 @@ class DownstreamClient:
                 await self._client.__aenter__()
             except Exception:
                 self._client = None
+                await self._close_http()
                 raise
 
     def _build_transport(self):
@@ -158,6 +170,9 @@ class DownstreamClient:
             except (Exception, asyncio.CancelledError):  # noqa: BLE001
                 pass
             self._client = None
+        await self._close_http()
+
+    async def _close_http(self) -> None:
         if self._http is not None:
             try:
                 await self._http.aclose()
@@ -188,7 +203,12 @@ class ClientPool:
                 self.registry.set_status(server.name, ServerStatus.CONNECTED)
             except Exception as exc:  # noqa: BLE001
                 self.registry.set_status(server.name, ServerStatus.ERROR)
-                logger.warning("server.connect_failed", server=server.name, error=str(exc))
+                logger.warning(
+                    "server.connect_failed",
+                    server=server.name,
+                    url=mask_url(server.url),
+                    error=str(exc),
+                )
         self._health_task = asyncio.create_task(self._health_loop())
 
     async def _health_loop(self) -> None:

@@ -23,6 +23,31 @@ def _state(request: Request) -> AppState:
     return request.app.state.app
 
 
+def _require_api_key(request: Request) -> None:
+    """Проверяет Authorization: Bearer <key> против MCP_ROUTER_API_KEY.
+
+    Если ключ не задан в окружении — доступ открыт (обратная совместимость).
+    """
+    state: AppState = request.app.state.app
+    if not state.api_key:
+        return
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Требуется API-ключ (Authorization: Bearer <key>)",
+        )
+    if auth[7:].strip() != state.api_key:
+        raise HTTPException(status_code=401, detail="Неверный API-ключ")
+
+
+router = APIRouter(
+    prefix="/run",
+    tags=["run"],
+    dependencies=[Depends(_require_api_key)],
+)
+
+
 class SelectRequest(BaseModel):
     tools: list[str] | None = None
     ttl: int = Field(default=3600, ge=0)

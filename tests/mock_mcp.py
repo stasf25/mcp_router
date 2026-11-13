@@ -28,6 +28,31 @@ def build_mock_server(name: str = "mock") -> MCPServer:
     return server
 
 
+class FailSwitch:
+    """Флаг, переключающий mock-сервер в режим «все вызовы падают»."""
+
+    def __init__(self) -> None:
+        self.fail = False
+
+
+def build_flaky_mock_server(name: str = "flaky", switch: FailSwitch | None = None) -> MCPServer:
+    """Mock-сервер, чей tool можно заставить падать через ``switch.fail``.
+
+    Позволяет эмулировать недоступность нижестоящего сервера в runtime
+    (для интеграционного теста circuit breaker / graceful degradation).
+    """
+    switch = switch or FailSwitch()
+    server = MCPServer(name=name)
+
+    @server.tool(name="ping", description="Проверка доступности")
+    async def ping() -> str:
+        if switch.fail:
+            raise RuntimeError("mock server unavailable")
+        return "pong"
+
+    return server
+
+
 def serve_mcp_server_on_thread(app, port: int, path: str = "/mcp") -> uvicorn.Server:
     """Запускает Starlette/MCPServer app на указанном порту в фоновом потоке."""
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")

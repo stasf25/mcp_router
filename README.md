@@ -7,7 +7,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![MCP 2.3.0](https://img.shields.io/badge/MCP-2.3.0-green.svg)](https://modelcontextprotocol.io/)
 [![License: PN v1.0.0](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0)
-[![Tests](https://img.shields.io/badge/tests-80%20passed-brightgreen.svg)](test_suite.md)
+[![Tests](https://img.shields.io/badge/tests-80%2B%20passed-brightgreen.svg)](test_suite.md)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)](https://fastapi.tiangolo.com/)
 
 </div>
@@ -288,6 +288,15 @@ After that you can add an MCP server in Dify and connect to it. The URL can poin
 ## REST API
 
 ### Runtime (`/run/*`) — for LLM agents and integrations
+
+All `/run/*` endpoints can be protected by an optional API key. Set `MCP_ROUTER_API_KEY` in the environment; when set, every request must carry `Authorization: Bearer <key>` (otherwise `401`). If the variable is unset, the endpoints stay open — useful inside a trusted docker network.
+
+```bash
+curl -X POST http://localhost:8000/run/select \
+  -H 'Authorization: Bearer <MCP_ROUTER_API_KEY>' \
+  -H 'Content-Type: application/json' \
+  -d '{"tools": ["playwright.browser_navigate"], "ttl": 3600}'
+```
 
 #### Dynamic tool selection → `POST /run/select`
 

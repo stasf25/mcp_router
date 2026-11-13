@@ -7,7 +7,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![MCP 2.3.0](https://img.shields.io/badge/MCP-2.3.0-green.svg)](https://modelcontextprotocol.io/)
 [![License: PN v1.0.0](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0)
-[![Tests](https://img.shields.io/badge/tests-80%20passed-brightgreen.svg)](test_suite.md)
+[![Tests](https://img.shields.io/badge/tests-80%2B%20passed-brightgreen.svg)](test_suite.md)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)](https://fastapi.tiangolo.com/)
 
 </div>
@@ -288,6 +288,15 @@ docker network create shared-network
 ## REST API
 
 ### Runtime (`/run/*`) — для LLM-агентов и интеграций
+
+Все эндпоинты `/run/*` можно защитить опциональным API-ключом. Задайте `MCP_ROUTER_API_KEY` в окружении — при заданном ключе каждый запрос должен содержать `Authorization: Bearer <key>` (иначе `401`). Если переменная не задана, эндпоинты остаются открытыми — удобно внутри доверенной docker-сети.
+
+```bash
+curl -X POST http://localhost:8000/run/select \
+  -H 'Authorization: Bearer <MCP_ROUTER_API_KEY>' \
+  -H 'Content-Type: application/json' \
+  -d '{"tools": ["playwright.browser_navigate"], "ttl": 3600}'
+```
 
 #### Динамический выбор tools → `POST /run/select`
 

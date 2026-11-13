@@ -13,7 +13,7 @@ python -m pytest -q    # полный прогон тестов
 ruff check src tests   # линтер
 ```
 
-Ожидаемый результат: **80 passed**, ruff — без замечаний.
+Ожидаемый результат: **87 passed**, ruff — без замечаний.
 
 ### Полезные варианты запуска
 
@@ -46,8 +46,9 @@ python -m pytest -q --disable-warnings    # без предупреждений
 | `test_mcp_client.py` | Unit-тесты `CircuitBreaker` (открытие по порогу, сброс по успеху, half-open после recovery) и передача параметров breaker из конфига в `DownstreamClient` |
 | `test_api.py` | REST-эндпоинты админки `/api/*`: health, servers, groups, tools, tool detail, 404; DNS-rebinding защита SDK — разрешённые Host-заголовки (`mcp_router`, `localhost`, `127.0.0.1`) проходят host-check, посторонний Host отклоняется 421 |
 | `test_contract.py` | Контрактные тесты MCP-протокола через внешний `Client` (`mcp` SDK): handshake, `tools/list` на `/mcp`, `/mcp/{group}`, `/mcp/{server}.{tool}`, `tools/call`, ошибка для tool вне скоупа, эндпоинт tool detail, админка |
-| `test_run_api.py` | Этап 3: JWT (`jwt_service`), `/run/select` (пустой список → все tools, 400 на отсутствующие/недоступные, `expires_at` вычисляется из `ttl`), `/run/select/{group}` (404 на группу, пустой → вся группа, 400 на tools вне группы), `/run/tool/call` (успех; неизвестный tool → всегда 200 с `isError: true` в результате), JWT-фильтрация на `/mcp` через header и query (для `list_tools` и `call_tool`), невалидный JWT |
+| `test_run_api.py` | Этап 3: JWT (`jwt_service`), `/run/select` (пустой список → все tools, 400 на отсутствующие/недоступные, `expires_at` вычисляется из `ttl`), `/run/select/{group}` (404 на группу, пустой → вся группа, 400 на tools вне группы), `/run/tool/call` (успех; неизвестный tool → всегда 200 с `isError: true` в результате), JWT-фильтрация на `/mcp` через header и query (для `list_tools` и `call_tool`), невалидный JWT, защита `/run/*` API-ключом (отсутствует/неверный → 401, верный → 200) |
 | `test_metrics.py` | Prometheus-метрики: `/metrics` отдаёт exposition, `mcp_router_tool_calls_total` пишется и через `/run/tool/call`, и через MCP `tools/call` на `/mcp`, gauge статусов серверов, HTTP-метрика с нормализацией пути, unit-тесты `normalize_path` |
+| `test_graceful_degradation.py` | Интеграционный тест graceful degradation (ТЗ §5.1): flaky-сервер через `FailSwitch`/`build_flaky_mock_server`; рабочий вызов → `isError: false`; падение сервера → 200 с `isError: true`; после срабатывания circuit breaker (порог 2) роутер не падает, продолжает отвечать 200 с `isError: true` |
 
 ---
 
@@ -57,6 +58,9 @@ python -m pytest -q --disable-warnings    # без предупреждений
 
 - `build_mock_server(name)` — строит `MCPServer` (mcp 2.x) с тремя tools:
   `navigate`, `click`, `screenshot` (имена без префикса сервера);
+- `build_flaky_mock_server(name, switch)` + `FailSwitch` — mock с tool `ping`,
+  который можно заставить падать в runtime через `switch.fail` (для
+  интеграционного теста graceful degradation / circuit breaker);
 - `serve_mcp_server_on_thread(app, port, path="/")` — запускает uvicorn в фоновом
   потоке (`should_exit=True` — аналог graceful shutdown без Docker, которого нет
   в среде разработки);
