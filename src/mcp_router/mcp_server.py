@@ -18,6 +18,7 @@ from mcp_types import CallToolResult
 from mcp_types import Tool as MCPTool
 from starlette.applications import Starlette
 
+from .config import protocol_version_mode
 from .jwt_service import ALL_TOOLS, JWTError, JWTService
 from .mcp_client import ClientPool
 from .registry import FilterSpec, Registry
@@ -129,11 +130,130 @@ class ScopedMCPServer(MCPServer):
         spec = self._resolve_spec(context)
         if not self._registry.is_tool_available(name, spec):
             raise ToolNotAvailableError(RESOLVED_ERROR.format(name=name))
-        return await self._pool.call_tool(name, arguments)
+        session_id, meta_user = self._extract_client_context(context)
+        return await self._pool.call_tool(
+            name, arguments, session_id=session_id, meta_user=meta_user
+        )
+
+    _RESERVED_META_PREFIX = "io.modelcontextprotocol/"
+
+    @classmethod
+    def _extract_client_context(cls, context=None) -> tuple[str | None, dict[str, Any] | None]:
+        """Определяет версию внешнего клиента и извлекает контекст для проброса.
+
+        Возвращает ``(session_id, meta_user)``:
+        - v2-клиент (входящий ``_meta`` несёт зарезервированные ключи
+          ``io.modelcontextprotocol/*``): ``session_id=None``, ``meta_user`` —
+          пользовательские ключи входящего ``_meta`` (исключая зарезервированные);
+        - v1-клиент (иначе): ``session_id`` из контекста/заголовка
+          ``mcp-session-id``, ``meta_user=None``.
+        """
+        incoming_meta = None
+        if context is not None:
+            try:
+                incoming_meta = getattr(context.request_context, "meta", None)
+            except Exception:  # noqa: BLE001
+                incoming_meta = None
+        if incoming_meta:
+            user_keys = {
+                k: v
+                for k, v in incoming_meta.items()
+                if not k.startswith(cls._RESERVED_META_PREFIX)
+            }
+            if user_keys:
+                # v2-клиент: зарезервированные ключи присутствуют → это modern-путь.
+                return None, user_keys
+        session_id = cls._extract_session_id(context)
+        return session_id, None
+
+    @staticmethod
+    def _extract_session_id(context=None) -> str | None:
+        """Извлекает идентификатор внешней сессии из контекста запроса.
+
+        Предпочитает ``context.request_context.session_id`` (когда SDK его
+        предоставляет), иначе — HTTP-заголовок ``mcp-session-id`` (legacy
+        Streamable HTTP / SSE). Возвращает ``None``, если сессия отсутствует
+        (stdio, stateless) — тогда проброс не выполняется.
+        """
+        if context is None:
+            return None
+        try:
+            sid = getattr(context.request_context, "session_id", None)
+        except Exception:  # noqa: BLE001
+            sid = None
+        if sid:
+            return sid
+        request = getattr(context.request_context, "request", None)
+        if request is not None:
+            try:
+                return request.headers.get("mcp-session-id")
+            except Exception:  # noqa: BLE001
+                return None
+        return None
 
 
 class ToolNotAvailableError(Exception):
     """Tool не входит в скоуп данного endpoint."""
+
+
+class ProtocolVersionGateMiddleware:
+    """Ограничивает принимаемую версию MCP-протокола на /mcp по заголовку.
+
+    По спецификации MCP v2 (2026-07-28) HTTP-транспорт обязан передавать
+    заголовок ``mcp-protocol-version``. Отсутствие заголовка (или значение
+    2025-*) — детерминированный признак v1-клиента; 2026-* — v2. Тело не
+    парсим: гейт принимает решение чисто по заголовку, в полном согласии с
+    эрой-маршрутизацией самого SDK (streamable_http_manager).
+
+    ``mode``: 'auto' (по умолчанию — принимать обе эры), 'v1' (только v1),
+    'v2' (только v2). Отклонённый запрос получает HTTP 406.
+    """
+
+    _HDR = b"mcp-protocol-version"
+
+    def __init__(self, app, mode: str = "auto") -> None:
+        self.app = app
+        self.mode = mode
+
+    @staticmethod
+    def _client_era(headers: dict[bytes, bytes] | None) -> str:
+        """Определяет эру внешнего клиента по заголовку (v2 / v1).
+
+        v2 — заголовок начинается с 2026; иначе (2025-* или отсутствует) — v1.
+        """
+        if headers:
+            for k, v in headers:
+                if k.lower() == ProtocolVersionGateMiddleware._HDR:
+                    value = v.decode("latin-1").strip()
+                    if value.startswith("2026"):
+                        return "v2"
+                    break
+        return "v1"
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and self.mode != "auto":
+            era = self._client_era(scope.get("headers"))
+            denied = (self.mode == "v1" and era == "v2") or (
+                self.mode == "v2" and era == "v1"
+            )
+            if denied:
+                body = (
+                    f'{{"error": "protocol version not allowed: '
+                    f"mode={self.mode}, client={era}\"}}"
+                ).encode()
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 406,
+                        "headers": [
+                            (b"content-type", b"application/json"),
+                            (b"content-length", str(len(body)).encode()),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
 
 
 class CaptureContextMiddleware:
@@ -170,7 +290,9 @@ class CaptureContextMiddleware:
             await self.app(scope, receive, send)
 
 
-def build_mcp_app(server: ScopedMCPServer) -> Starlette:
+def build_mcp_app(
+    server: ScopedMCPServer, protocol_mode: str | None = None
+) -> Starlette:
     """Возвращает streamable_http_app сервера с ASGI-middleware захвата контекста.
 
     Используется wildcard-путь ``/{rest:path}``, чтобы один app обслуживал
@@ -183,7 +305,12 @@ def build_mcp_app(server: ScopedMCPServer) -> Starlette:
     docker-сети к сервису ходят по имени ``mcp_router`` и часто с голым Host
     (без порта), поэтому расширяем список разрешённых хостов: точные имена +
     wildcard-паттерны с портом (SDK проверяет `:*` только если в Host есть порт).
+
+    ``protocol_mode`` — значение ``MCP_PROTOCOL_VERSION`` (auto/v1/v2); если
+    ``None`` — читается из env (fail fast на невалидном значении).
     """
+    if protocol_mode is None:
+        protocol_mode = protocol_version_mode()
     transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=[
@@ -200,5 +327,7 @@ def build_mcp_app(server: ScopedMCPServer) -> Starlette:
         streamable_http_path="/{rest:path}",
         transport_security=transport_security,
     )
+    if protocol_mode != "auto":
+        inner.add_middleware(ProtocolVersionGateMiddleware, mode=protocol_mode)
     inner.add_middleware(CaptureContextMiddleware)
     return inner

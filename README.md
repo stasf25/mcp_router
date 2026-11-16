@@ -7,7 +7,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![MCP 2.3.0](https://img.shields.io/badge/MCP-2.3.0-green.svg)](https://modelcontextprotocol.io/)
 [![License: PN v1.0.0](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0)
-[![Tests](https://img.shields.io/badge/tests-80%2B%20passed-brightgreen.svg)](test_suite.md)
+[![Tests](https://img.shields.io/badge/tests-120%2B%20passed-brightgreen.svg)](test_suite.md)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)](https://fastapi.tiangolo.com/)
 
 </div>
@@ -38,6 +38,7 @@ Real token savings on simple requests can reach **10×** compared to passing the
   - [Runtime (`/run/*`)](#runtime-run---for-llm-agents-and-integrations)
   - [Administration (`/api/*`)](#administration-api-read-only)
 - [MCP endpoint](#mcp-endpoint)
+- [Context passthrough and protocol version](#context-passthrough-and-protocol-version)
 - [Observability](#observability)
 - [Fault Tolerance](#fault-tolerance)
 - [Demo](#demo)
@@ -162,6 +163,7 @@ Authentication headers are set in the `headers` section as a list of `Header: va
 - `enabled: true` — the server is connected, its tools are registered and visible; with `enabled: false` the server/group is ignored (not connected, tools not visible).
 - `timeout: 30` — tool-call timeout in seconds (default 30).
 - The transport to the downstream server is determined by `url`: a path ending in `/sse` means SSE; otherwise — streamable HTTP. Example: `https://host/mcp` → streamable HTTP; `https://host/sse` → SSE.
+- `session_id_key` (string, optional) — the name of the `_meta` key under which the client's session id (v1) is passed through to the downstream server. Default is `None` — passthrough disabled. See the «[Context passthrough and protocol version](#context-passthrough-and-protocol-version)» section.
 
 ### Step 2. Launch
 
@@ -411,6 +413,39 @@ A single `ScopedMCPServer` is mounted at `/mcp`; the tool set is determined per 
 
 - no JWT passed — aggregate mode (all tools);
 - invalid/expired JWT — a safe empty scope: `tools/list` returns an empty array, `tools/call` returns an error for any tool (tool out of scope).
+
+---
+
+## Context passthrough and protocol version
+
+### `MCP_PROTOCOL_VERSION` — protocol version limit on `/mcp`
+
+The environment key `MCP_PROTOCOL_VERSION` (values: `auto`, `v1`, `v2`; default `auto`) limits the accepted MCP protocol version on the `/mcp` endpoint. Client classification is done **only by the `mcp-protocol-version` HTTP header**: `2026-*` → v2, `2025-*` or a missing header → v1 (the request body is not parsed). This matches the MCP SDK's own era routing.
+
+| Value | Behavior |
+| --- | --- |
+| `auto` (default) | both versions are accepted — v1 and v2 |
+| `v1` | only v1 clients are accepted; v2 clients get `406 Not Acceptable` |
+| `v2` | only v2 clients are accepted; v1 clients get `406 Not Acceptable` |
+
+An invalid value causes a startup error (fail fast). Set it in the environment (e.g. in `.env` / docker-compose):
+
+```bash
+MCP_PROTOCOL_VERSION=v2
+```
+
+### Context passthrough to downstream servers
+
+`mcp_router` stays a stateless facade and passes the external user's context through to the downstream MCP servers according to the v1/v2 matrix:
+
+| Incoming client | Downstream server | What is passed through |
+| --- | --- | --- |
+| v2 | v2 | only **user** keys of the incoming `_meta` (transit); reserved keys of the `io.modelcontextprotocol/*` namespace are filtered out |
+| v2 | v1 | passthrough is impossible (a v1 server has a default session) |
+| v1 | v2 | the client's `session_id` in `_meta` under the key set by `session_id_key` in `config.yaml` |
+| v1 | v1 | the same as v1→v2 |
+
+- For `/run/*` endpoints (no incoming context), a v1 server always works in the **default session**, and a v2 server with the **default `_meta`**.
 
 ---
 

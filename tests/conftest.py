@@ -11,7 +11,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mock_mcp import build_mock_server, free_port, serve_mcp_server_on_thread  # noqa: E402
+from mock_mcp import (  # noqa: E402
+    build_meta_capture_mock_server,
+    build_mock_server,
+    free_port,
+    serve_mcp_server_on_thread,
+)
 
 
 @pytest.fixture
@@ -71,3 +76,81 @@ groups:
     assert _wait_http_ready(port, "/api/health")
     time.sleep(0.6)
     return f"http://127.0.0.1:{port}"
+
+
+@pytest.fixture
+def router_url_with_session(monkeypatch):
+    """Роутер над capture-сервером с session_id_key, пробрасывающим сессии.
+
+    Capture-сервер отдаёт `_meta` входящего tools/call, поэтому по ответу можно
+    убедиться, что session_id внешнего клиента дошёл до нижестоящего сервера
+    под настроенным ключом.
+    """
+    from mcp_router.main import create_app
+
+    port = free_port()
+    capture_app = build_meta_capture_mock_server("capture").streamable_http_app(
+        streamable_http_path="/mcp"
+    )
+    serve_mcp_server_on_thread(capture_app, port, "/mcp")
+    capture_url = f"http://127.0.0.1:{port}/mcp"
+    assert _wait_http_ready(port, "/mcp")
+
+    cfg = f"""
+servers:
+  - name: capture
+    url: {capture_url}
+    enabled: true
+    timeout: 30
+    session_id_key: my.router.session
+groups:
+  - name: all
+    tools: [capture.echo_meta]
+    enabled: true
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        f.write(cfg)
+        cfg_path = f.name
+
+    app = create_app(cfg_path)
+    router_port = free_port()
+    serve_mcp_server_on_thread(app, router_port)
+    assert _wait_http_ready(router_port, "/api/health")
+    time.sleep(0.6)
+    return f"http://127.0.0.1:{router_port}"
+
+
+@pytest.fixture
+def router_url_with_session_default_off():
+    """То же, но без session_id_key: проброс по умолчанию выключен (обратная совместимость)."""
+    from mcp_router.main import create_app
+
+    port = free_port()
+    capture_app = build_meta_capture_mock_server("capture").streamable_http_app(
+        streamable_http_path="/mcp"
+    )
+    serve_mcp_server_on_thread(capture_app, port, "/mcp")
+    capture_url = f"http://127.0.0.1:{port}/mcp"
+    assert _wait_http_ready(port, "/mcp")
+
+    cfg = f"""
+servers:
+  - name: capture
+    url: {capture_url}
+    enabled: true
+    timeout: 30
+groups:
+  - name: all
+    tools: [capture.echo_meta]
+    enabled: true
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        f.write(cfg)
+        cfg_path = f.name
+
+    app = create_app(cfg_path)
+    router_port = free_port()
+    serve_mcp_server_on_thread(app, router_port)
+    assert _wait_http_ready(router_port, "/api/health")
+    time.sleep(0.6)
+    return f"http://127.0.0.1:{router_port}"

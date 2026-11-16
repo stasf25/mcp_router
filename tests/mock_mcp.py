@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import socket
 import threading
 
 import uvicorn
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.context import Context
 
 
 def build_mock_server(name: str = "mock") -> MCPServer:
@@ -49,6 +51,23 @@ def build_flaky_mock_server(name: str = "flaky", switch: FailSwitch | None = Non
         if switch.fail:
             raise RuntimeError("mock server unavailable")
         return "pong"
+
+    return server
+
+
+def build_meta_capture_mock_server(name: str = "capture") -> MCPServer:
+    """Mock-сервер с tool, который возвращает `_meta` входящего запроса.
+
+    Позволяет проверить, что роутер пробрасывает `session_id` нижестоящему
+    серверу через ключ в `_meta` (вариант A, mcp_router_TZ_sessions.md).
+    `context.request_context.meta` — это `_meta` входящего tools/call.
+    """
+    server = MCPServer(name=name)
+
+    @server.tool(name="echo_meta", description="Возвращает _meta запроса")
+    async def echo_meta(context: Context) -> str:
+        meta = getattr(context.request_context, "meta", None)
+        return json.dumps(meta or {}, sort_keys=True)
 
     return server
 

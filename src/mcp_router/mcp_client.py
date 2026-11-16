@@ -132,6 +132,23 @@ class DownstreamClient:
             return ServerStatus.ERROR
         return ServerStatus.CONNECTED if self._client is not None else ServerStatus.DISCONNECTED
 
+    @property
+    def protocol_version(self) -> str | None:
+        """Согласованная версия протокола нижестоящего сервера (после connect)."""
+        client = self._client
+        if client is None:
+            return None
+        try:
+            return client.protocol_version
+        except Exception:  # noqa: BLE001
+            return None
+
+    @property
+    def is_v2(self) -> bool:
+        """True, если нижестоящий сервер работает по v2 (stateless, 2026-*)."""
+        version = self.protocol_version
+        return bool(version and version.startswith("2026"))
+
     async def list_tools(self) -> list[MCPTool]:
         client = self._require_client()
         try:
@@ -143,11 +160,18 @@ class DownstreamClient:
             self.last_error = str(exc)
             raise
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        session_id: str | None = None,
+        meta_user: dict[str, Any] | None = None,
+    ) -> CallToolResult:
         client = self._require_client()
         start = time.monotonic()
+        meta = self._build_outgoing_meta(session_id, meta_user)
         try:
-            result = await client.call_tool(name, arguments)
+            result = await client.call_tool(name, arguments, meta=meta)
             self.breaker.record_success()
             is_error = bool(getattr(result, "is_error", False))
             record_tool_call(self.server.name, name, time.monotonic() - start, is_error)
@@ -157,6 +181,25 @@ class DownstreamClient:
             self.last_error = str(exc)
             record_tool_call(self.server.name, name, time.monotonic() - start, True)
             raise
+
+    def _build_outgoing_meta(
+        self,
+        session_id: str | None,
+        meta_user: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Формирует исходящий ``_meta`` по матрице v1/v2 (mcp_router_TZ_sessions.md §2).
+
+        - v1-клиент (есть ``session_id``) + задан ``session_id_key``: кладём
+          ``session_id`` в ``_meta`` под ``session_id_key`` (варианты 3 и 4);
+        - v2-клиент (есть пользовательские ключи ``meta_user``) + нижестоящий
+          сервер v2: пробрасываем ``meta_user`` транзитом (вариант 1);
+        - v2-клиент → v1-сервер: проброс невозможен (вариант 2), ``_meta`` пуст.
+        """
+        if session_id is not None and self.server.session_id_key:
+            return {self.server.session_id_key: session_id}
+        if meta_user and self.is_v2:
+            return meta_user
+        return None
 
     def _require_client(self) -> Client:
         if self._client is None:
@@ -240,14 +283,20 @@ class ClientPool:
         tools = await dc.list_tools()
         return tools
 
-    async def call_tool(self, qualified: str, arguments: dict[str, Any]) -> CallToolResult:
+    async def call_tool(
+        self,
+        qualified: str,
+        arguments: dict[str, Any],
+        session_id: str | None = None,
+        meta_user: dict[str, Any] | None = None,
+    ) -> CallToolResult:
         server_name, tool_name = qualified.split(".", 1)
         dc = self._clients.get(server_name)
         if dc is None:
             raise ValueError(f"Неизвестный сервер: {server_name}")
         if not dc.breaker.allow_request():
             raise RuntimeError(f"Сервер '{server_name}' недоступен (circuit breaker open)")
-        return await dc.call_tool(tool_name, arguments)
+        return await dc.call_tool(tool_name, arguments, session_id=session_id, meta_user=meta_user)
 
     async def shutdown(self) -> None:
         if self._health_task is not None:

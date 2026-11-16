@@ -6,9 +6,15 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
+
+
+def _read_text(res) -> str:
+    return "".join(x.text for x in res.content if getattr(x, "type", None) == "text")
 
 
 async def list_tool_names(url):
@@ -85,3 +91,85 @@ def test_admin_page_live(router_url):
     assert r.headers["content-type"].startswith("text/html")
     assert "tool-modal" in r.text
     assert "tools-head" in r.text
+
+
+@pytest.mark.anyio
+async def test_session_id_passthrough_to_downstream(router_url_with_session):
+    """Проброс session_id (v1-клиент → v2-сервер): нижестоящий получает в _meta ключ из конфига.
+
+    Внешний v1-клиент (mode="legacy", initialize handshake) подключается к /mcp;
+    роутер (с session_id_key: my.router.session) передаёт session_id внешней
+    сессии в _meta исходящего tools/call. Capture-сервер возвращает полученный
+    _meta, что подтверждает сквозной проброс.
+    """
+    async with Client(streamable_http_client(f"{router_url_with_session}/mcp"), mode="legacy") as c:
+        res = await c.call_tool("capture.echo_meta", {})
+        meta = json.loads(_read_text(res))
+        assert res.is_error is False
+        assert isinstance(meta.get("my.router.session"), str)
+        assert len(meta["my.router.session"]) > 0
+
+
+@pytest.mark.anyio
+async def test_session_id_distinguishes_clients(router_url_with_session):
+    """Две внешние v1-сессии дают разные session_id (не перепутаны между клиентами)."""
+    async with Client(
+        streamable_http_client(f"{router_url_with_session}/mcp"), mode="legacy"
+    ) as ca:
+        async with Client(
+            streamable_http_client(f"{router_url_with_session}/mcp"), mode="legacy"
+        ) as cb:
+            ra = await ca.call_tool("capture.echo_meta", {})
+            rb = await cb.call_tool("capture.echo_meta", {})
+            meta_a = json.loads(_read_text(ra))
+            meta_b = json.loads(_read_text(rb))
+            assert meta_a["my.router.session"] != meta_b["my.router.session"]
+
+
+@pytest.mark.anyio
+async def test_session_id_stable_within_client(router_url_with_session):
+    """Одна внешняя v1-сессия в течение жизни даёт один и тот же session_id."""
+    async with Client(streamable_http_client(f"{router_url_with_session}/mcp"), mode="legacy") as c:
+        r1 = await c.call_tool("capture.echo_meta", {})
+        r2 = await c.call_tool("capture.echo_meta", {})
+        m1 = json.loads(_read_text(r1))
+        m2 = json.loads(_read_text(r2))
+        assert m1["my.router.session"] == m2["my.router.session"]
+
+
+@pytest.mark.anyio
+async def test_session_id_passthrough_disabled_by_default(router_url_with_session_default_off):
+    """Без session_id_key в конфиге проброс выключен: в _meta нет ключа (обратная совместимость)."""
+    async with Client(
+        streamable_http_client(f"{router_url_with_session_default_off}/mcp"), mode="legacy"
+    ) as c:
+        res = await c.call_tool("capture.echo_meta", {})
+        meta = json.loads(_read_text(res))
+        assert res.is_error is False
+        assert "my.router.session" not in meta
+
+
+@pytest.mark.anyio
+async def test_v2_meta_passthrough_to_downstream(router_url_with_session_default_off):
+    """v2→v2 pass-through: пользовательские ключи _meta доходят до нижестоящего v2-сервера.
+
+    Внешний v2-клиент кладёт пользовательские ключи в _meta вызова; роутер
+    пробрасывает их транзитом нижестоящему v2-серверу. Зарезервированные ключи
+    io.modelcontextprotocol/* исключаются из проброса.
+    """
+    async with Client(streamable_http_client(f"{router_url_with_session_default_off}/mcp")) as c:
+        res = await c.call_tool(
+            "capture.echo_meta",
+            {},
+            meta={
+                "tenant": "acme",
+                "request.user": "alice",
+                "io.modelcontextprotocol/forbidden": "must-be-filtered",
+            },
+        )
+        meta = json.loads(_read_text(res))
+        assert res.is_error is False
+        assert meta.get("tenant") == "acme"
+        assert meta.get("request.user") == "alice"
+        # зарезервированные ключи из входящего _meta не пробрасываются
+        assert "io.modelcontextprotocol/forbidden" not in meta

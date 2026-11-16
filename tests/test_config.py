@@ -67,6 +67,45 @@ servers:
     assert cb.recovery == 45.0
 
 
+def test_session_id_key_default_none(tmp_path):
+    """По умолчанию session_id_key = None (проброс выключен)."""
+    p = write_yaml(
+        tmp_path,
+        """
+servers:
+  - name: s
+    url: http://s/mcp
+""",
+    )
+    assert load_config(p).server("s").session_id_key is None
+
+
+def test_session_id_key_custom(tmp_path):
+    p = write_yaml(
+        tmp_path,
+        """
+servers:
+  - name: s
+    url: http://s/mcp
+    session_id_key: my.own.session_key
+""",
+    )
+    assert load_config(p).server("s").session_id_key == "my.own.session_key"
+
+
+def test_session_id_key_empty_string(tmp_path):
+    p = write_yaml(
+        tmp_path,
+        """
+servers:
+  - name: s
+    url: http://s/mcp
+    session_id_key: ""
+""",
+    )
+    assert load_config(p).server("s").session_id_key == ""
+
+
 def test_circuit_breaker_validation(tmp_path):
     # threshold < 1 и неположительные window/recovery — ошибка валидации.
     for bad in (

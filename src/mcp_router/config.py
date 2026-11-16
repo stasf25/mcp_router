@@ -17,7 +17,28 @@ from pydantic import BaseModel, Field, model_validator
 
 CONFIG_PATH_ENV = "MCP_ROUTER_CONFIG"
 
+# Версия протокола MCP, с которой роутер выступает в роли MCP-сервера на /mcp.
+# Значения: auto (по умолчанию), v1, v2. См. mcp_router_TZ_sessions.md §4.6.
+PROTOCOL_VERSION_ENV = "MCP_PROTOCOL_VERSION"
+PROTOCOL_VERSIONS = ("auto", "v1", "v2")
+
 _ENV_VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def protocol_version_mode(env: dict[str, str] | None = None) -> str:
+    """Возвращает режим версии протокола роутера (роль сервера) из env.
+
+    Читает ``MCP_PROTOCOL_VERSION`` один раз; по умолчанию ``auto``. Невалидное
+    значение → ``ConfigError`` (fail fast при старте).
+    """
+    env = env if env is not None else os.environ
+    value = env.get(PROTOCOL_VERSION_ENV, "auto").strip().lower()
+    if value not in PROTOCOL_VERSIONS:
+        raise ConfigError(
+            f"{PROTOCOL_VERSION_ENV} должно быть одним из {list(PROTOCOL_VERSIONS)}; "
+            f"получено {value!r}"
+        )
+    return value
 
 
 def expand_env(text: str, env: dict[str, str]) -> str:
@@ -57,6 +78,7 @@ class ServerConfig(BaseModel):
     enabled: bool = True
     timeout: float = Field(default=30.0, gt=0)
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
+    session_id_key: str | None = Field(default=None)
 
     @property
     def header_map(self) -> dict[str, str]:
