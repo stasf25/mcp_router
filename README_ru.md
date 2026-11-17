@@ -420,7 +420,7 @@ curl -X POST http://localhost:8000/run/tool/call \
 
 ### `MCP_PROTOCOL_VERSION` — ограничение версии протокола на `/mcp`
 
-Ключ окружения `MCP_PROTOCOL_VERSION` (значения: `auto`, `v1`, `v2`; по умолчанию `auto`) ограничивает принимаемую версию протокола MCP на эндпоинте `/mcp`. Классификация клиента выполняется **только по HTTP-заголовку `mcp-protocol-version`**: `2026-*` → v2, `2025-*` или отсутствие заголовка → v1 (тело запроса не парсится). Это соответствует эра-маршрутизации самого MCP SDK.
+Ключ окружения `MCP_PROTOCOL_VERSION` (значения: `auto`, `v1`, `v2`; по умолчанию `auto`) ограничивает принимаемую версию протокола MCP на эндпоинте `/mcp`. Классификация клиента выполняется **только по HTTP-заголовку `mcp-protocol-version`**: заголовок отсутствует или его значение входит в известный набор версий v1 (`HANDSHAKE_PROTOCOL_VERSIONS` из MCP SDK: `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25`) → v1; заголовок присутствует со значением вне этого набора → v2 (тело запроса не парсится). Классификация сверяется с реестром версий самого SDK, поэтому учитывает и будущие версии протокола (до выхода v3).
 
 | Значение | Поведение |
 | --- | --- |
@@ -453,6 +453,9 @@ MCP_PROTOCOL_VERSION=v2
 ## Наблюдаемость
 
 - Структурированные JSON-логи (`structlog`): `tool.call`, `server.health`, `group.select`.
+- Логирование подключений с указанием версии протокола:
+  - `server.connected` — установлено подключение к нижестоящему MCP-серверу (поля `server`, `protocol_version` — согласованная версия напр. `2026-07-28`, `protocol_era` — `v1`/`v2`); при неудаче — `server.connect_failed`;
+  - `mcp.client_connected` — внешний клиент установил соединение с `/mcp` (поле `version` — `v1`/`v2` по классификации из заголовка `mcp-protocol-version`, `method` — `initialize`/`server/discover`). Логирование чисто наблюдательное и не влияет на фильтр `MCP_PROTOCOL_VERSION`.
 - Prometheus на `GET /metrics` (без аутентификации):
   - `mcp_router_tool_calls_total{server, tool, status}` — счётчик вызовов tools, `status` = `ok` / `error` (покрывает и `/run/tool/call`, и MCP `tools/call`);
   - `mcp_router_tool_calls_duration_seconds{server, tool}` — гистограмма длительности;

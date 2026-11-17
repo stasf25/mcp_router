@@ -420,7 +420,7 @@ A single `ScopedMCPServer` is mounted at `/mcp`; the tool set is determined per 
 
 ### `MCP_PROTOCOL_VERSION` — protocol version limit on `/mcp`
 
-The environment key `MCP_PROTOCOL_VERSION` (values: `auto`, `v1`, `v2`; default `auto`) limits the accepted MCP protocol version on the `/mcp` endpoint. Client classification is done **only by the `mcp-protocol-version` HTTP header**: `2026-*` → v2, `2025-*` or a missing header → v1 (the request body is not parsed). This matches the MCP SDK's own era routing.
+The environment key `MCP_PROTOCOL_VERSION` (values: `auto`, `v1`, `v2`; default `auto`) limits the accepted MCP protocol version on the `/mcp` endpoint. Client classification is done **only by the `mcp-protocol-version` HTTP header**: a missing header or a value from the known set of v1 versions (`HANDSHAKE_PROTOCOL_VERSIONS` from the MCP SDK: `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25`) → v1; a present header with a value outside that set → v2 (the request body is not parsed). Classification is checked against the SDK's own version registry, so it also accounts for future protocol versions (up to v3).
 
 | Value | Behavior |
 | --- | --- |
@@ -452,6 +452,9 @@ MCP_PROTOCOL_VERSION=v2
 ## Observability
 
 - Structured JSON logs (`structlog`): `tool.call`, `server.health`, `group.select`.
+- Connection logging with protocol version:
+  - `server.connected` — connection to a downstream MCP server established (fields `server`, `protocol_version` — the negotiated version e.g. `2026-07-28`, `protocol_era` — `v1`/`v2`); on failure — `server.connect_failed`;
+  - `mcp.client_connected` — an external client established a connection to `/mcp` (field `version` — `v1`/`v2` per the `mcp-protocol-version` header classification, `method` — `initialize`/`server/discover`). Logging is purely observational and does not affect the `MCP_PROTOCOL_VERSION` gate.
 - Prometheus at `GET /metrics` (no authentication):
   - `mcp_router_tool_calls_total{server, tool, status}` — tool-call counter, `status` = `ok` / `error` (covers both `/run/tool/call` and MCP `tools/call`);
   - `mcp_router_tool_calls_duration_seconds{server, tool}` — duration histogram;

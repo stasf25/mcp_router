@@ -244,6 +244,13 @@ class ClientPool:
             try:
                 await dc.connect()
                 self.registry.set_status(server.name, ServerStatus.CONNECTED)
+                logger.info(
+                    "server.connected",
+                    server=server.name,
+                    url=mask_url(server.url),
+                    protocol_version=dc.protocol_version,
+                    protocol_era="v2" if dc.is_v2 else "v1",
+                )
             except Exception as exc:  # noqa: BLE001
                 self.registry.set_status(server.name, ServerStatus.ERROR)
                 logger.warning(

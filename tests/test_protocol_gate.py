@@ -112,3 +112,35 @@ def test_protocol_version_mode_invalid_raises(monkeypatch, bad):
     monkeypatch.setenv("MCP_PROTOCOL_VERSION", bad)
     with pytest.raises(ConfigError):
         protocol_version_mode()
+
+
+def _headers(hdr: str | None):
+    if hdr is None:
+        return []
+    return [(b"mcp-protocol-version", hdr.encode("latin-1"))]
+
+
+@pytest.mark.parametrize(
+    "hdr,expected",
+    [
+        (None, "v1"),
+        ("2024-11-05", "v1"),
+        ("2025-03-26", "v1"),
+        ("2025-11-25", "v1"),
+        ("2026-07-28", "v2"),
+        ("2027-01-01", "v2"),
+        ("future-v3-2028", "v2"),
+        ("bogus", "v2"),
+    ],
+)
+def test_client_era_classification(hdr, expected):
+    """Классификация эры: отсутствие заголовка/значение из набора v1 → v1, иначе → v2.
+
+    Классификация сверяется с реестром известных версий v1 из MCP SDK
+    (mcp_types.version.HANDSHAKE_PROTOCOL_VERSIONS): значения вне набора
+    (напр. будущие 2027-* или неизвестные строки) считаются v2, что
+    учитывает будущие версии протокола до выхода v3.
+    """
+    from mcp_router.mcp_server import ProtocolVersionGateMiddleware
+
+    assert ProtocolVersionGateMiddleware._client_era(_headers(hdr)) == expected

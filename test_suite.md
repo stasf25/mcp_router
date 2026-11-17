@@ -13,7 +13,7 @@ python -m pytest -q    # полный прогон тестов
 ruff check src tests   # линтер
 ```
 
-Ожидаемый результат: **123 passed**, ruff — без замечаний.
+Ожидаемый результат: **135 passed**, ruff — без замечаний.
 
 ### Полезные варианты запуска
 
@@ -50,6 +50,7 @@ python -m pytest -q --disable-warnings    # без предупреждений
 | `test_metrics.py` | Prometheus-метрики: `/metrics` отдаёт exposition, `mcp_router_tool_calls_total` пишется и через `/run/tool/call`, и через MCP `tools/call` на `/mcp`, gauge статусов серверов, HTTP-метрика с нормализацией пути, unit-тесты `normalize_path` |
 | `test_graceful_degradation.py` | Интеграционный тест graceful degradation (ТЗ §5.1): flaky-сервер через `FailSwitch`/`build_flaky_mock_server`; рабочий вызов → `isError: false`; падение сервера → 200 с `isError: true`; после срабатывания circuit breaker (порог 2) роутер не падает, продолжает отвечать 200 с `isError: true` |
 | `test_protocol_gate.py` | Гейт версии протокола `MCP_PROTOCOL_VERSION` (auto/v1/v2): при `v1` v1-клиент проходит, v2-клиент получает `406`; при `v2` наоборот; `auto` принимает обе эры; fail-fast на невалидном значении (`protocol_version_mode`) |
+| `test_logging.py` | Логирование подключений с версией протокола: `server.connected` (downstream, поля `protocol_version`/`protocol_era`), `mcp.client_connected` (внешние клиенты на `/mcp`: legacy → `version=v1`, modern → `version=v2`) через `structlog.testing.capture_logs`; проверка, что логирование не влияет на фильтр `MCP_PROTOCOL_VERSION` (при `v1` v2-клиент отклонён и не логируется, v1-клиент проходит и логируется) |
 
 ---
 
@@ -100,6 +101,9 @@ python -m pytest -q --disable-warnings    # без предупреждений
 6. **Гейт версии протокола** (`test_protocol_gate.py`): `MCP_PROTOCOL_VERSION`
    (auto/v1/v2) — интеграционные проверки `406`-отклонений по эре клиента
    (через `create_app` с установленным env) + unit-тесты `protocol_version_mode`.
+7. **Логирование подключений** (`test_logging.py`): перехват `structlog`
+   (`capture_logs`) — `server.connected` для downstream и `mcp.client_connected`
+   для внешних клиентов `/mcp` (v1/v2).
 
 ---
 

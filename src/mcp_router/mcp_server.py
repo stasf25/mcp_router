@@ -12,10 +12,12 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs
 
+import structlog
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import CallToolResult
 from mcp_types import Tool as MCPTool
+from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
 from starlette.applications import Starlette
 
 from .config import protocol_version_mode
@@ -26,6 +28,8 @@ from .registry import FilterSpec, Registry
 MCP_MOUNT = "/mcp"
 
 RESOLVED_ERROR = "Tool {name} not in scope"
+
+logger = structlog.get_logger()
 
 
 @dataclass
@@ -200,10 +204,13 @@ class ProtocolVersionGateMiddleware:
     """Ограничивает принимаемую версию MCP-протокола на /mcp по заголовку.
 
     По спецификации MCP v2 (2026-07-28) HTTP-транспорт обязан передавать
-    заголовок ``mcp-protocol-version``. Отсутствие заголовка (или значение
-    2025-*) — детерминированный признак v1-клиента; 2026-* — v2. Тело не
-    парсим: гейт принимает решение чисто по заголовку, в полном согласии с
-    эрой-маршрутизацией самого SDK (streamable_http_manager).
+    заголовок ``mcp-protocol-version``. Отсутствие заголовка —
+    детерминированный признак v1-клиента; наличие заголовка со значением,
+    не входящим в известный набор версий v1 (``HANDSHAKE_PROTOCOL_VERSIONS``
+    из SDK), трактуется как v2. Такая логика учитывает и будущие версии
+    протокола (до выхода v3). Тело не парсим: гейт принимает решение чисто
+    по заголовку, в полном согласии с эрой-маршрутизацией самого SDK
+    (streamable_http_manager).
 
     ``mode``: 'auto' (по умолчанию — принимать обе эры), 'v1' (только v1),
     'v2' (только v2). Отклонённый запрос получает HTTP 406.
@@ -219,13 +226,16 @@ class ProtocolVersionGateMiddleware:
     def _client_era(headers: dict[bytes, bytes] | None) -> str:
         """Определяет эру внешнего клиента по заголовку (v2 / v1).
 
-        v2 — заголовок начинается с 2026; иначе (2025-* или отсутствует) — v1.
+        v1 — заголовок отсутствует или значение входит в известный набор
+        версий v1 (``HANDSHAKE_PROTOCOL_VERSIONS`` из SDK). Всё остальное
+        (заголовок присутствует со значением вне набора, напр. будущие
+        2027-*) — v2.
         """
         if headers:
             for k, v in headers:
                 if k.lower() == ProtocolVersionGateMiddleware._HDR:
                     value = v.decode("latin-1").strip()
-                    if value.startswith("2026"):
+                    if value not in HANDSHAKE_PROTOCOL_VERSIONS:
                         return "v2"
                     break
         return "v1"
@@ -260,7 +270,8 @@ class CaptureContextMiddleware:
     """Чистый ASGI-middleware: фиксирует path/headers в contextvar, ответ не буферизует.
 
     BaseHTTPMiddleware буферизует streaming-ответы (ломает SSE MCP), поэтому
-    используем низкоуровневый ASGI-пропуск.
+    используем низкоуровневый ASGI-пропуск. Попутно логирует установление
+    соединений внешних клиентов на /mcp (см. ``_log_connect``).
     """
 
     def __init__(self, app) -> None:
@@ -283,11 +294,51 @@ class CaptureContextMiddleware:
                 RequestCtx(path=scope["path"], headers=headers, query=query)
             )
             try:
+                self._log_connect(scope["path"], headers)
                 await self.app(scope, receive, send)
             finally:
                 _REQUEST_CTX.reset(token)
         else:
             await self.app(scope, receive, send)
+
+    @staticmethod
+    def _log_connect(path: str, headers: dict[str, str]) -> None:
+        """Логирует установление соединения внешнего клиента на /mcp.
+
+        Единый механизм для v1 и v2 (без разбора тела):
+        - v1-клиент: первый запрос сессии идёт без ``mcp-session-id`` и без
+          modern-заголовка ``mcp-method``;
+        - v2-клиент (stateless): ``server/discover`` приходит в modern-envelope
+          с ``mcp-method: server/discover`` (и ``mcp-protocol-version``).
+
+        Последующие v2-запросы (tools/list, tools/call и т.п.) несут иной
+        ``mcp-method`` и потому подключением не считаются.
+
+        Логирование чисто наблюдательное: читает только заголовки и не влияет
+        на прохождение запроса, в т.ч. на гейт ``MCP_PROTOCOL_VERSION``.
+        Любая ошибка логирования гасится, чтобы не сломать запрос.
+        """
+        try:
+            if not path.startswith(MCP_MOUNT):
+                return
+            if headers.get("mcp-session-id"):
+                return
+            mcp_method = headers.get("mcp-method")
+            if mcp_method is not None and mcp_method != "server/discover":
+                return
+            raw_headers = [
+                (k.encode("latin-1"), v.encode("latin-1"))
+                for k, v in headers.items()
+            ]
+            era = ProtocolVersionGateMiddleware._client_era(raw_headers)
+            logger.info(
+                "mcp.client_connected",
+                version=era,
+                method=mcp_method or "initialize",
+                client=headers.get("host"),
+            )
+        except Exception:  # noqa: BLE001 — лог не должен влиять на запрос
+            pass
 
 
 def build_mcp_app(
